@@ -11,8 +11,7 @@ import os
 import re
 
 from fastapi import Depends, FastAPI, Header, HTTPException
-from huggingface_hub import InferenceClient
-from huggingface_hub.errors import HfHubHTTPError
+from gradio_client import Client
 from PIL import Image
 from pydantic import BaseModel, Field, field_validator
 
@@ -38,41 +37,35 @@ def require_owner(x_owner_token: str | None = Header(default=None)) -> str:
         raise HTTPException(status_code=401, detail="Missing X-Owner-Token header")
     return x_owner_token
 
-# Models served via the Hugging Face Inference API (router). Swap these for
-# any other model id available on the HF router if you prefer.
-HF_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
-HF_VISION_MODEL = "meta-llama/Llama-4-Scout-17B-16E-Instruct"
-HF_IMAGE_MODEL = "black-forest-labs/FLUX.1-schnell"
+# Hugging Face Space — Gradio client
+HF_SPACE_ID = "Cocateail/Z-Ai-x-maya"
 
 # Reject anything absurdly large before it hits the model or the database —
 # a data URL this size already implies a multi-megabyte image.
 MAX_IMAGE_DATA_URL_LENGTH = 8_000_000
 _DATA_URL_RE = re.compile(r"^data:image/(png|jpe?g|webp);base64,")
 
-_hf_client: InferenceClient | None = None
+_gradio_client: Client | None = None
 
 
-def get_hf_client() -> InferenceClient:
-    global _hf_client
-    if _hf_client is None:
-        # Put your Hugging Face token in the HF_TOKEN secret (Tools -> Secrets).
-        api_key = os.environ.get("HF_TOKEN")
-        if not api_key:
-            raise HTTPException(
-                status_code=500,
-                detail="HF_TOKEN is not configured on the server.",
-            )
-        _hf_client = InferenceClient(api_key=api_key)
-    return _hf_client
+def get_gradio_client() -> Client:
+    global _gradio_client
+    if _gradio_client is None:
+        hf_token = os.environ.get("HF_TOKEN")
+        _gradio_client = Client(HF_SPACE_ID, token=hf_token, verbose=False)
+    return _gradio_client
 
 
-MAYA_SYSTEM_PROMPT = (
-    "You are Maya, a warm, sharp, and highly capable AI assistant. "
-    "You remember the full context of the current conversation and refer "
-    "back to earlier details naturally when relevant. Keep responses "
-    "clear, helpful, and to the point, while sounding personable rather "
-    "than robotic."
-)
+def call_gradio_space(message: str) -> str:
+    """Call the /maya_brain endpoint on the Gradio Space and return the reply."""
+    client = get_gradio_client()
+    result = client.predict(
+        message={"text": message, "files": []},
+        api_name="/maya_brain",
+    )
+    return str(result)
+
+
 
 
 class CreateConversationBody(BaseModel):
@@ -281,27 +274,10 @@ def api_create_message(
         conversation_id, "user", body.content, reply_to_id=body.reply_to_id
     )
 
-    history = storage.get_messages(conversation_id)
-    chat_messages = [{"role": "system", "content": MAYA_SYSTEM_PROMPT}] + [
-        {"role": m["role"], "content": m["content"]} for m in history
-    ]
-
-    client = get_hf_client()
     try:
-        completion = client.chat_completion(
-            model=HF_MODEL,
-            messages=chat_messages,
-            max_tokens=1024,
-        )
-        reply_text = completion.choices[0].message.content or ""
-    except HfHubHTTPError:
-        logger.exception("Hugging Face Inference API request failed")
-        raise HTTPException(
-            status_code=502,
-            detail="Maya couldn't respond right now. Please try again in a moment.",
-        )
-    except Exception:  # surface a clean, sanitized error to the client
-        logger.exception("Unexpected error generating a response")
+        reply_text = call_gradio_space(body.content)
+    except Exception:
+        logger.exception("Gradio Space request failed")
         raise HTTPException(
             status_code=502,
             detail="Maya couldn't respond right now. Please try again in a moment.",
