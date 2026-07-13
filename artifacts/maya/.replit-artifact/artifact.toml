@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "Maya"
+version = "1.0.0"
+id = "artifacts/maya"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 24676
+
+[services.development]
+run = "pnpm --filter @workspace/maya run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/maya", "run", "build" ]
+publicDir = "artifacts/maya/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "24676"
+BASE_PATH = "/"

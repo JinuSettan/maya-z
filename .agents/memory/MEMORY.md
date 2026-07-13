@@ -1,0 +1,1 @@
+- [huggingface-hub install workaround](hf-hub-install.md) — pyproject.toml routes it through pytorch-cpu index which has no Linux versions; use uv pip install instead.
