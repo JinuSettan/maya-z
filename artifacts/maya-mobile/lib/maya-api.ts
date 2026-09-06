@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { generateLocalReply } from './local-llm';
 
 export type Conversation = {
   id: string;
@@ -76,13 +77,12 @@ export const mayaApi = {
   messages: {
     list: (conversationId: string) =>
       request<Message[]>(`/conversations/${conversationId}/messages`),
-    create: (conversationId: string, content: string) =>
-      request<{ user_message: Message; assistant_message: Message }>(
-        `/conversations/${conversationId}/messages`,
-        {
-          method: 'POST',
-          body: JSON.stringify({ content }),
-        },
-      ),
+    create: async (conversationId: string, content: string) => {
+      const now = new Date().toISOString();
+      const user_message = { id: 'local-' + Date.now(), conversation_id: conversationId, role: 'user', content, created_at: now, pinned: false, reply_to_id: null, image_url: null };
+      const replyText = await generateLocalReply(content);
+      const assistant_message = { id: 'local-' + (Date.now()+1), conversation_id: conversationId, role: 'assistant', content: replyText, created_at: new Date().toISOString(), pinned: false, reply_to_id: null, image_url: null };
+      return { user_message, assistant_message };
+    },
   },
 };
