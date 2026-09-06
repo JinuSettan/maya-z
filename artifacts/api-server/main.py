@@ -11,6 +11,7 @@ import os
 import re
 
 from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from gradio_client import Client
 from PIL import Image
 from pydantic import BaseModel, Field, field_validator
@@ -21,10 +22,17 @@ app = FastAPI(title="Maya API")
 
 logger = logging.getLogger("maya.api")
 
-# No CORS middleware: the frontend and this API are always served through the
-# same reverse-proxy origin, so cross-origin access is unnecessary. Leaving
-# CORS closed prevents third-party sites from calling this API (and burning
-# Hugging Face usage) from a browser.
+# The web app is same-origin through the shared proxy, while Expo Go loads the
+# mobile bundle from its own preview origin. Keep the policy limited to local
+# development and Replit preview domains so the phone app can reach the API
+# without opening it to arbitrary websites.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origin_regex=r"https://.*\.replit\.dev|http://localhost(:\d+)?",
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 storage.init_db()
 

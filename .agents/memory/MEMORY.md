@@ -1,2 +1,3 @@
 - [huggingface-hub install workaround](hf-hub-install.md) — pyproject.toml routes it through pytorch-cpu index which has no Linux versions; use uv pip install instead.
 - [Gradio Space client](gradio-client.md) — use gradio_client.Client with token= (not hf_token=); fn_index discovery needed for named endpoints.
+- [Expo preview API access](expo-preview-cors.md) — Expo Go/web preview runs on a separate Replit origin; API CORS must allow trusted *.replit.dev origins.

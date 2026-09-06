@@ -1,0 +1,24 @@
+kind = "mobile"
+previewPath = "/maya-mobile/"
+title = "Maya for Android"
+description = "A native Android companion for Maya, the warm tech-savvy Malayali chatbot. Browse conversations, continue chats, and receive real replies from the existing Maya AI backend on your phone."
+version = "1.0.0"
+id = "artifacts/maya-mobile"
+router = "expo-domain"
+
+[[services]]
+name = "expo"
+ensurePreviewReachable = "/status"
+paths = [ "/maya-mobile/" ]
+localPort = 20288
+
+[services.development]
+run = "pnpm --filter @workspace/maya-mobile run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/maya-mobile", "run", "build" ]
+run = [ "pnpm", "--filter", "@workspace/maya-mobile", "run", "serve" ]
+
+[services.env]
+PORT = "20288"
+BASE_PATH = "/maya-mobile/"
