@@ -25,6 +25,12 @@ jobs:
         working-directory: artifacts/maya-mobile
         run: pnpm install
 
+      - name: Download model
+        working-directory: artifacts/maya-mobile
+        run: |
+          mkdir -p ../../attached_assets/models
+          wget -O ../../attached_assets/models/qwen2.5-0.5b-instruct-q4_0.gguf https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_0.gguf
+
       - name: Expo prebuild
         working-directory: artifacts/maya-mobile
         run: npx expo prebuild --platform android
