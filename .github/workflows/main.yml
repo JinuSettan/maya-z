@@ -1,0 +1,40 @@
+name: Build Android APK
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Install pnpm
+        run: npm install -g pnpm
+
+      - name: Install dependencies
+        working-directory: artifacts/maya-mobile
+        run: pnpm install
+
+      - name: Expo prebuild
+        working-directory: artifacts/maya-mobile
+        run: npx expo prebuild --platform android
+
+      - name: Build APK
+        working-directory: artifacts/maya-mobile/android
+        run: chmod +x ./gradlew && ./gradlew assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: maya-apk
+          path: artifacts/maya-mobile/android/app/build/outputs/apk/debug/app-debug.apk
