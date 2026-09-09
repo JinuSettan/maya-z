@@ -15,24 +15,31 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: pnpm
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
           version: 10
 
+      - name: Verify tools
+        run: |
+          node --version
+          pnpm --version
+          java -version
+
       - name: Install dependencies
         run: |
-          pnpm config set enable-pre-post-scripts true
+          pnpm config set dangerouslyAllowAllBuilds true
           pnpm install --config.confirmModulesPurge=false --unsafe-perm
 
       - name: Expo prebuild
-        run: npx expo prebuild --platform android --non-interactive
+        run: |
+          npx expo prebuild --platform android --non-interactive
 
       - name: Build APK
         run: |
           cd android
+          chmod +x gradlew
           ./gradlew assembleRelease
 
       - name: Upload APK
