@@ -23,7 +23,15 @@ jobs:
 
       - name: Install dependencies
         working-directory: artifacts/maya-mobile
-        run: pnpm install
+        run: pnpm install --config.confirmModulesPurge=false --unsafe-perm
+
+      - name: Approve builds
+        working-directory: artifacts/maya-mobile
+        run: pnpm approve-builds llama.rn esbuild || true
+
+      - name: Rebuild native deps
+        working-directory: artifacts/maya-mobile
+        run: pnpm rebuild || true
 
       - name: Download model
         working-directory: artifacts/maya-mobile
@@ -44,3 +52,4 @@ jobs:
         with:
           name: maya-apk
           path: artifacts/maya-mobile/android/app/build/outputs/apk/debug/app-debug.apk
+``
