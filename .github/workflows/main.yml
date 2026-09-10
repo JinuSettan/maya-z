@@ -1,4 +1,4 @@
-name: Build Android APK
+name: Build MAYA Android APK
 
 on:
   workflow_dispatch:
@@ -14,7 +14,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -33,12 +33,13 @@ jobs:
           pnpm install --config.confirmModulesPurge=false --unsafe-perm
 
       - name: Expo prebuild
+        working-directory: artifacts/maya-mobile
         run: |
-          npx expo prebuild --platform android --non-interactive
+          CI=1 pnpm exec expo prebuild --platform android
 
       - name: Build APK
+        working-directory: artifacts/maya-mobile/android
         run: |
-          cd android
           chmod +x gradlew
           ./gradlew assembleRelease
 
@@ -46,4 +47,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: maya-ai-apk
-          path: android/app/build/outputs/apk/release/*.apk
+          path: artifacts/maya-mobile/android/app/build/outputs/apk/release/*.apk
