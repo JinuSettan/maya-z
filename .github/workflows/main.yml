@@ -8,6 +8,14 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /usr/local/.ghcup
+          sudo rm -rf /usr/local/lib/android/sdk/ndk/25*
+          sudo docker image prune --all --force
+
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -21,6 +29,12 @@ jobs:
         with:
           version: 10
 
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
       - name: Verify tools
         run: |
           node --version
@@ -31,6 +45,10 @@ jobs:
         run: |
           pnpm config set dangerouslyAllowAllBuilds true
           pnpm install --config.confirmModulesPurge=false --unsafe-perm
+
+      - name: Download model
+        working-directory: artifacts/maya-mobile
+        run: mkdir -p ../../attached_assets/models && wget -O ../../attached_assets/models/qwen2.5-0.5b-instruct-q4_0.gguf https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_0.gguf
 
       - name: Expo prebuild
         working-directory: artifacts/maya-mobile
