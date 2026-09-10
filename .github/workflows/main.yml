@@ -35,7 +35,7 @@ jobs:
       - name: Expo prebuild
         working-directory: artifacts/maya-mobile
         run: |
-          CI=1 pnpm exec expo prebuild --platform android
+          CI=1 pnpm exec expo prebuild --platform android --no-install
 
       - name: Build APK
         working-directory: artifacts/maya-mobile/android
