@@ -52,14 +52,18 @@ jobs:
 
       - name: Expo prebuild
         working-directory: artifacts/maya-mobile
+        env:
+          CI: true
         run: |
           CI=1 pnpm exec expo prebuild --platform android --no-install
 
       - name: Build APK
         working-directory: artifacts/maya-mobile/android
+        env:
+          CI: true
         run: |
           chmod +x gradlew
-          ./gradlew assembleRelease
+          ./gradlew assembleRelease --no-daemon
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
