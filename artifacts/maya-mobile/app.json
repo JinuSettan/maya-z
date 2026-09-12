@@ -1,0 +1,30 @@
+{
+  "expo": {
+    "name": "Maya for Android",
+    "slug": "maya-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "scheme": "maya-mobile",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "supportsTablet": false
+    },
+    "android": {
+      "package": "com.cocateail.maya"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "Maya uses your camera to take photos for image analysis."
+        }
+      ],
+      "llama.rn"
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    }
+  }
+}
