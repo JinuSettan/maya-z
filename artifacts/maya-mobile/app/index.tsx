@@ -1,3 +1,4 @@
+import { router } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -1563,6 +1564,22 @@ export default function MayaChatScreen() {
                 color={colors.mutedForeground}
               />
             </Pressable>
+          <Pressable
+            accessibilityLabel="Create video"
+            testID="create-video"
+            onPress={() => router.push("/video-create" as any)}
+            disabled={isSending}
+            style={({ pressed }) => [
+              styles.composerActionButton,
+              pressed && styles.pressed,
+            ]}
+          >
+            <Ionicons
+              name="videocam-outline"
+              size={21}
+              color={colors.mutedForeground}
+            />
+          </Pressable>
           </View>
 
           <TextInput
