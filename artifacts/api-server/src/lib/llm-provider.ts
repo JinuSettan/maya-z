@@ -1,6 +1,7 @@
 import type { ChatHistoryMessage, LlmProvider } from './types';
 
 const DEFAULT_TIMEOUT_MS = 20_000;
+const CHAT_COMPLETIONS_PATH = '/chat/completions';
 
 function required(name: string): string {
   const value = process.env[name]?.trim();
@@ -8,8 +9,14 @@ function required(name: string): string {
   return value;
 }
 
+function providerEndpoint(configuredUrl: string): string {
+  const url = configuredUrl.replace(/\/$/, '');
+  return url.endsWith(CHAT_COMPLETIONS_PATH) ? url : `${url}${CHAT_COMPLETIONS_PATH}`;
+}
+
 export function createLlmProvider(): LlmProvider {
-  const apiUrl = required('MAYA_LLM_API_URL').replace(/\/$/, '');
+  const configuredUrl = required('MAYA_LLM_API_URL');
+  const apiUrl = providerEndpoint(configuredUrl);
   const apiKey = required('MAYA_LLM_API_KEY');
   const model = required('MAYA_LLM_MODEL');
   const timeoutMs = Number(process.env.MAYA_LLM_TIMEOUT_MS ?? DEFAULT_TIMEOUT_MS);
@@ -19,7 +26,7 @@ export function createLlmProvider(): LlmProvider {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), Number.isFinite(timeoutMs) ? timeoutMs : DEFAULT_TIMEOUT_MS);
       try {
-        const response = await fetch(`${apiUrl}/chat/completions`, {
+        const response = await fetch(apiUrl, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -31,7 +38,9 @@ export function createLlmProvider(): LlmProvider {
           }),
           signal: controller.signal,
         });
-        if (!response.ok) throw new Error(`LLM provider returned HTTP ${response.status}`);
+        if (!response.ok) {
+          throw new Error(`LLM provider returned HTTP ${response.status} from ${new URL(apiUrl).origin}`);
+        }
         const data: unknown = await response.json();
         const content = (data as { choices?: Array<{ message?: { content?: unknown } }> })
           .choices?.[0]?.message?.content;
