@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import healthRouter from "./health";
 import videoGenerationRouter from "./video-generation";
-import chatRouter from "./chat";
+import chatRouter from './chat';
 
 const router: IRouter = Router();
 
