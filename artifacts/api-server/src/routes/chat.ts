@@ -34,7 +34,10 @@ router.post('/chat', async (req, res) => {
     const message = await createLlmProvider().complete(body.message.trim(), body.history as ChatHistoryMessage[] | undefined);
     res.json({ message });
   } catch (error) {
-    req.log?.error({ err: error }, 'Online chat provider failed');
+    req.log?.error({
+      error: error instanceof Error ? error.message : 'Unknown provider error',
+      conversationId: typeof body.conversationId === 'string' ? body.conversationId : undefined,
+    }, 'Online chat provider failed');
     res.status(502).json({ error: 'Online chat is temporarily unavailable' });
   }
 });
