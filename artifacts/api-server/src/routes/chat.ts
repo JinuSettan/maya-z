@@ -31,14 +31,14 @@ router.post('/chat', async (req, res) => {
   }
 
   try {
-    const message = await createLlmProvider().complete(body.message.trim(), body.history as ChatHistoryMessage[] | undefined);
+const message = await createLlmProvider().complete(body.message.trim(), body.history as ChatHistoryMessage[]);
     res.json({ message });
   } catch (error) {
     req.log?.error({
       error: error instanceof Error ? error.message : 'Unknown provider error',
       conversationId: typeof body.conversationId === 'string' ? body.conversationId : undefined,
     }, 'Online chat provider failed');
-    res.status(502).json({ error: 'Online chat is temporarily unavailable' });
+    res.status(502).json({ error: 'Online chat is temporarily unavailable', details: error instanceof Error ? error.message : 'Unknown provider error' });
   }
 });
 

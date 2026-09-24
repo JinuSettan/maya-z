@@ -1,3 +1,4 @@
+import "dotenv/config";
 import type { ChatHistoryMessage, LlmProvider } from './types';
 
 const DEFAULT_TIMEOUT_MS = 20_000;
