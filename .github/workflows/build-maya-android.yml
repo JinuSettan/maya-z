@@ -30,24 +30,37 @@ jobs:
           java-version: '17'
           cache: 'gradle'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install Android Build Tools, NDK & CMake
+      - name: Set up Android SDK, NDK & CMake
         run: |
+          export ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          export ANDROID_SDK_ROOT="$ANDROID_HOME"
+          echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
+          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> $GITHUB_ENV
+
+          SDKMANAGER=$(find "$ANDROID_HOME/cmdline-tools" -name sdkmanager -type f | sort -V | tail -n 1)
+          if [ -z "$SDKMANAGER" ]; then
+            echo "::error::sdkmanager not found in $ANDROID_HOME/cmdline-tools"
+            exit 1
+          fi
+          echo "Using sdkmanager: $SDKMANAGER"
+          echo "$(dirname "$SDKMANAGER")" >> $GITHUB_PATH
+          echo "$ANDROID_HOME/platform-tools" >> $GITHUB_PATH
+
           echo "Accepting Android SDK licenses..."
-          yes | sdkmanager --licenses || true
-          echo "Installing Android SDK platforms, CMake 3.22.1 and NDK..."
-          sdkmanager --install \
+          yes | "$SDKMANAGER" --licenses > /dev/null || true
+
+          echo "Installing Android SDK 34, Build-Tools 34.0.0, CMake 3.22.1, and NDK 26.1.10909125..."
+          "$SDKMANAGER" --install \
             "platforms;android-34" \
             "build-tools;34.0.0" \
             "cmake;3.22.1" \
             "ndk;26.1.10909125"
+
           sudo apt-get update -qq
           sudo apt-get install -y -qq ninja-build
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@v3
+        uses: pnpm/action-setup@v4
         with:
           version: 9
 
@@ -55,7 +68,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'pnpm'
 
       - name: Install Node & pnpm dependencies
         run: |
@@ -95,7 +107,7 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
           echo "Starting real Gradle build for MAYA Android..."
-          ./gradlew assembleRelease --stacktrace --info
+          ./gradlew assembleRelease --stacktrace
 
       - name: Locate, Verify and Inspect APK
         id: verify_apk
