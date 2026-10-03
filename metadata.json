@@ -1,0 +1,8 @@
+{
+  "name": "Maya AI Companion",
+  "description": "An interactive AI companion featuring MAYA and ROCKY characters, real-time voice synthesis, multimodal chat, developer mode controls, and customizable personalities.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
