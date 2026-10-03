@@ -14,14 +14,18 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.FolderZip
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -71,6 +75,13 @@ fun GitStudioDialog(
     // Import States
     var importRepoUrl by remember { mutableStateOf("") }
     var importBranch by remember { mutableStateOf("main") }
+
+    // CI/CD Actions States
+    var cicdRepo by remember { mutableStateOf("JinuSettan/maya-z") }
+    var cicdBranch by remember { mutableStateOf("main") }
+    var workflowRuns by remember { mutableStateOf<List<WorkflowRunInfo>>(emptyList()) }
+    var workflowArtifacts by remember { mutableStateOf<List<WorkflowArtifactInfo>>(emptyList()) }
+    var isCheckingRuns by remember { mutableStateOf(false) }
 
     // Status Log & Loader
     var isProcessing by remember { mutableStateOf(false) }
@@ -141,7 +152,7 @@ fun GitStudioDialog(
 
                 Spacer(modifier = Modifier.height(14.dp))
 
-                // Mode Tabs (Push to GitHub | Import from GitHub)
+                // Mode Tabs (Push | Import | CI/CD Actions)
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -149,7 +160,7 @@ fun GitStudioDialog(
                         .background(DarkCard)
                         .padding(4.dp)
                 ) {
-                    listOf("🚀 Push to GitHub", "📥 Import Repository").forEachIndexed { index, label ->
+                    listOf("🚀 Push", "📥 Import", "⚡ CI/CD APK").forEachIndexed { index, label ->
                         Box(
                             modifier = Modifier
                                 .weight(1f)
@@ -163,7 +174,7 @@ fun GitStudioDialog(
                                 text = label,
                                 color = if (activeTab == index) TextPrimary else TextSecondary,
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 12.sp
+                                fontSize = 11.sp
                             )
                         }
                     }
@@ -331,7 +342,7 @@ fun GitStudioDialog(
                         }
                     }
 
-                } else {
+                } else if (activeTab == 1) {
                     // IMPORT FROM GITHUB SECTION
                     Text("Import Incomplete Project from GitHub", color = TextPrimary, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                     Spacer(modifier = Modifier.height(6.dp))
@@ -401,6 +412,199 @@ fun GitStudioDialog(
                             Icon(Icons.Default.CloudDownload, contentDescription = null, tint = Color.White)
                             Spacer(modifier = Modifier.width(8.dp))
                             Text("Import Repository into MAYA", color = Color.White, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                } else {
+                    // CI/CD APK BUILD SECTION (Tab 2)
+                    Text("GitHub Actions APK Builder", color = TextPrimary, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    OutlinedTextField(
+                        value = cicdRepo,
+                        onValueChange = { cicdRepo = it },
+                        label = { Text("Repository (owner/repo)") },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = accentColor,
+                            unfocusedBorderColor = DarkBorder,
+                            focusedContainerColor = DarkCard,
+                            unfocusedContainerColor = DarkCard,
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary
+                        )
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    OutlinedTextField(
+                        value = cicdBranch,
+                        onValueChange = { cicdBranch = it },
+                        label = { Text("Branch (default: main)") },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = accentColor,
+                            unfocusedBorderColor = DarkBorder,
+                            focusedContainerColor = DarkCard,
+                            unfocusedContainerColor = DarkCard,
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary
+                        )
+                    )
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = {
+                                if (githubToken.isBlank()) {
+                                    Toast.makeText(context, "Please enter your GitHub Token!", Toast.LENGTH_SHORT).show()
+                                    return@Button
+                                }
+                                isProcessing = true
+                                statusLog = "Triggering GitHub Actions workflow (workflow_dispatch)..."
+
+                                coroutineScope.launch(Dispatchers.IO) {
+                                    val (success, msg) = triggerWorkflowDispatch(
+                                        token = githubToken.trim(),
+                                        repoPath = cicdRepo.trim(),
+                                        ref = cicdBranch.trim()
+                                    )
+                                    val runs = fetchWorkflowRuns(githubToken.trim(), cicdRepo.trim())
+                                    withContext(Dispatchers.Main) {
+                                        isProcessing = false
+                                        statusLog = msg
+                                        workflowRuns = runs
+                                    }
+                                }
+                            },
+                            enabled = !isProcessing,
+                            colors = ButtonDefaults.buttonColors(containerColor = accentColor),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(46.dp)
+                        ) {
+                            Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.White)
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Trigger Build", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        }
+
+                        OutlinedButton(
+                            onClick = {
+                                isCheckingRuns = true
+                                coroutineScope.launch(Dispatchers.IO) {
+                                    val runs = fetchWorkflowRuns(githubToken.trim(), cicdRepo.trim())
+                                    val artifacts = if (runs.isNotEmpty()) {
+                                        fetchWorkflowArtifacts(githubToken.trim(), cicdRepo.trim(), runs.first().id)
+                                    } else emptyList()
+
+                                    withContext(Dispatchers.Main) {
+                                        isCheckingRuns = false
+                                        workflowRuns = runs
+                                        workflowArtifacts = artifacts
+                                        if (runs.isNotEmpty()) {
+                                            val latest = runs.first()
+                                            statusLog = "Workflow: ${latest.name}\nStatus: ${latest.status} | Conclusion: ${latest.conclusion ?: "running..."}\nRuns found: ${runs.size}"
+                                        } else {
+                                            statusLog = "No recent workflow runs found. Click 'Trigger Build' to start!"
+                                        }
+                                    }
+                                }
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(46.dp)
+                        ) {
+                            Icon(Icons.Default.Refresh, contentDescription = null, tint = accentColor)
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Check Status", color = accentColor, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        }
+                    }
+
+                    if (workflowRuns.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text("Recent Actions Runs:", color = TextPrimary, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        workflowRuns.take(3).forEach { run ->
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp),
+                                shape = RoundedCornerShape(10.dp),
+                                color = DarkCard,
+                                border = BorderStroke(1.dp, DarkBorder)
+                            ) {
+                                Column(modifier = Modifier.padding(10.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "#${run.id}",
+                                            color = accentColor,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 11.sp
+                                        )
+                                        Text(
+                                            text = when {
+                                                run.conclusion == "success" -> "✅ SUCCESS"
+                                                run.conclusion == "failure" -> "❌ FAILED"
+                                                run.status == "in_progress" -> "⏳ IN PROGRESS"
+                                                run.status == "queued" -> "🕒 QUEUED"
+                                                else -> run.status.uppercase()
+                                            },
+                                            color = when {
+                                                run.conclusion == "success" -> Color(0xFF10B981)
+                                                run.conclusion == "failure" -> Color(0xFFEF4444)
+                                                else -> Color(0xFFF59E0B)
+                                            },
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 11.sp
+                                        )
+                                    }
+                                    Text(
+                                        text = run.htmlUrl,
+                                        color = TextMuted,
+                                        fontSize = 10.sp,
+                                        maxLines = 1
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    if (workflowArtifacts.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Text("Generated Artifacts:", color = TextPrimary, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        workflowArtifacts.forEach { art ->
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp),
+                                shape = RoundedCornerShape(10.dp),
+                                color = Color(0xFF064E3B).copy(alpha = 0.4f),
+                                border = BorderStroke(1.dp, Color(0xFF10B981))
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column {
+                                        Text(art.name, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                        Text("${art.sizeInBytes / (1024 * 1024)} MB", color = TextSecondary, fontSize = 10.sp)
+                                    }
+                                    Icon(Icons.Default.Download, contentDescription = "Download APK", tint = Color(0xFF10B981))
+                                }
+                            }
                         }
                     }
                 }
@@ -565,4 +769,157 @@ private suspend fun importProjectFromGitHubApi(
         files = importedFiles,
         mainHtmlContent = mainHtml
     )
+}
+
+data class WorkflowRunInfo(
+    val id: Long,
+    val name: String,
+    val status: String,
+    val conclusion: String?,
+    val htmlUrl: String,
+    val createdAt: String
+)
+
+data class WorkflowArtifactInfo(
+    val id: Long,
+    val name: String,
+    val sizeInBytes: Long,
+    val downloadUrl: String
+)
+
+// Trigger workflow_dispatch for build-maya-android.yml
+private suspend fun triggerWorkflowDispatch(
+    token: String,
+    repoPath: String,
+    ref: String = "main"
+): Pair<Boolean, String> = withContext(Dispatchers.IO) {
+    val cleanOwnerRepo = repoPath
+        .replace("https://github.com/", "")
+        .replace(".git", "")
+        .trim('/')
+
+    try {
+        val apiUrl = URL("https://api.github.com/repos/$cleanOwnerRepo/actions/workflows/build-maya-android.yml/dispatches")
+        val conn = apiUrl.openConnection() as HttpURLConnection
+        conn.requestMethod = "POST"
+        conn.doOutput = true
+        if (token.isNotBlank()) {
+            conn.setRequestProperty("Authorization", "token $token")
+        }
+        conn.setRequestProperty("Accept", "application/vnd.github.v3+json")
+        conn.setRequestProperty("Content-Type", "application/json")
+
+        val payload = JSONObject().apply {
+            put("ref", ref)
+        }
+
+        conn.outputStream.use { os ->
+            os.write(payload.toString().toByteArray())
+        }
+
+        val responseCode = conn.responseCode
+        if (responseCode in 200..204) {
+            Pair(true, "🚀 GitHub Actions APK Build triggered successfully on branch '$ref'!")
+        } else {
+            val err = try { conn.errorStream?.bufferedReader()?.use { it.readText() } ?: "" } catch (_: Exception) { "" }
+            Pair(false, "❌ Workflow Trigger Failed ($responseCode): $err")
+        }
+    } catch (e: Exception) {
+        Pair(false, "❌ Error triggering workflow: ${e.localizedMessage}")
+    }
+}
+
+// Fetch Workflow Runs
+private suspend fun fetchWorkflowRuns(
+    token: String,
+    repoPath: String
+): List<WorkflowRunInfo> = withContext(Dispatchers.IO) {
+    val cleanOwnerRepo = repoPath
+        .replace("https://github.com/", "")
+        .replace(".git", "")
+        .trim('/')
+
+    try {
+        val apiUrl = URL("https://api.github.com/repos/$cleanOwnerRepo/actions/workflows/build-maya-android.yml/runs?per_page=5")
+        val conn = apiUrl.openConnection() as HttpURLConnection
+        conn.requestMethod = "GET"
+        if (token.isNotBlank()) {
+            conn.setRequestProperty("Authorization", "token $token")
+        }
+        conn.setRequestProperty("Accept", "application/vnd.github.v3+json")
+
+        val responseCode = conn.responseCode
+        if (responseCode !in 200..204) {
+            return@withContext emptyList()
+        }
+
+        val responseText = conn.inputStream.bufferedReader().use { it.readText() }
+        val json = JSONObject(responseText)
+        val runsArray = json.optJSONArray("workflow_runs") ?: return@withContext emptyList()
+
+        val result = mutableListOf<WorkflowRunInfo>()
+        for (i in 0 until runsArray.length()) {
+            val runObj = runsArray.getJSONObject(i)
+            result.add(
+                WorkflowRunInfo(
+                    id = runObj.getLong("id"),
+                    name = runObj.optString("name", "Build MAYA Android APK"),
+                    status = runObj.optString("status", "unknown"),
+                    conclusion = if (runObj.isNull("conclusion")) null else runObj.getString("conclusion"),
+                    htmlUrl = runObj.optString("html_url", ""),
+                    createdAt = runObj.optString("created_at", "")
+                )
+            )
+        }
+        result
+    } catch (e: Exception) {
+        emptyList()
+    }
+}
+
+// Fetch Artifacts for a run
+private suspend fun fetchWorkflowArtifacts(
+    token: String,
+    repoPath: String,
+    runId: Long
+): List<WorkflowArtifactInfo> = withContext(Dispatchers.IO) {
+    val cleanOwnerRepo = repoPath
+        .replace("https://github.com/", "")
+        .replace(".git", "")
+        .trim('/')
+
+    try {
+        val apiUrl = URL("https://api.github.com/repos/$cleanOwnerRepo/actions/runs/$runId/artifacts")
+        val conn = apiUrl.openConnection() as HttpURLConnection
+        conn.requestMethod = "GET"
+        if (token.isNotBlank()) {
+            conn.setRequestProperty("Authorization", "token $token")
+        }
+        conn.setRequestProperty("Accept", "application/vnd.github.v3+json")
+
+        val responseCode = conn.responseCode
+        if (responseCode !in 200..204) {
+            return@withContext emptyList()
+        }
+
+        val responseText = conn.inputStream.bufferedReader().use { it.readText() }
+        val json = JSONObject(responseText)
+        val artifactsArray = json.optJSONArray("artifacts") ?: return@withContext emptyList()
+
+        val result = mutableListOf<WorkflowArtifactInfo>()
+        for (i in 0 until artifactsArray.length()) {
+            val artObj = artifactsArray.getJSONObject(i)
+            result.add(
+                WorkflowArtifactInfo(
+                    id = artObj.getLong("id"),
+                    name = artObj.optString("name", "maya-android-apk"),
+                    sizeInBytes = artObj.optLong("size_in_bytes", 0L),
+                    downloadUrl = artObj.optString("archive_download_url", "")
+                )
+            )
+        }
+        result
+    } catch (e: Exception) {
+        emptyList()
+    }
 }
