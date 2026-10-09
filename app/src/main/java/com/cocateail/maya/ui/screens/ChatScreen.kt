@@ -16,10 +16,12 @@ import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -32,11 +34,13 @@ import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DeveloperMode
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SportsEsports
+import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -59,6 +63,10 @@ import com.cocateail.maya.data.model.DeveloperConfig
 import com.cocateail.maya.data.model.MayaCharacter
 import com.cocateail.maya.data.specialist.SpecialistType
 import com.cocateail.maya.data.specialist.TaskClassifier
+import com.cocateail.maya.tessa.AssistantEngineMode
+import com.cocateail.maya.tessa.TessaTask
+import com.cocateail.maya.tessa.TessaTaskState
+import com.cocateail.maya.tessa.TessaUiStatus
 import com.cocateail.maya.ui.components.ChatBubble
 import com.cocateail.maya.ui.components.ConversationDrawerContent
 import com.cocateail.maya.ui.components.FaceMode
@@ -75,9 +83,16 @@ fun ChatScreen(
     messages: List<MessageEntity>,
     character: MayaCharacter,
     developerConfig: DeveloperConfig,
+    developerUnlocked: Boolean = developerConfig.developerUnlocked,
     isThinking: Boolean,
     isSpeaking: Boolean,
     activeReplyToMessage: MessageEntity? = null,
+    tessaTasks: List<TessaTask> = emptyList(),
+    tessaUiStatus: TessaUiStatus = TessaUiStatus.READY,
+    onSelectAssistantMode: (AssistantEngineMode) -> Unit = {},
+    onApproveTessaPermission: (String, Boolean) -> Unit = { _, _ -> },
+    onDenyTessaPermission: (String) -> Unit = {},
+    onCancelTessaTask: (String) -> Unit = {},
     onReplyToMessage: (MessageEntity?) -> Unit = {},
     onSendMessage: (String, Bitmap?, String?) -> Unit,
     onSendMessageDirect: suspend (String) -> String = { "I'm right here listening to you." },
@@ -86,6 +101,7 @@ fun ChatScreen(
     onDeleteConversation: (String) -> Unit,
     onPinMessage: (String, Boolean) -> Unit,
     onSpeakMessage: (String) -> Unit,
+    onOpenDeveloperPanel: () -> Unit = {},
     onOpenSettings: () -> Unit
 ) {
     val context = LocalContext.current
@@ -104,6 +120,8 @@ fun ChatScreen(
     var isVoiceCallActive by remember { mutableStateOf(false) }
     var isMediaStudioActive by remember { mutableStateOf(false) }
     var isAppGameStudioActive by remember { mutableStateOf(false) }
+    var isTessaComputerDialogOpen by remember { mutableStateOf(false) }
+    var isTessaDiagnosticsDialogOpen by remember { mutableStateOf(false) }
 
     val accentColor = if (character == MayaCharacter.ROCKY) PurpleAccent else VermilionPrimary
 
@@ -164,12 +182,24 @@ fun ChatScreen(
         }
     }
 
-    val isOffline = !developerConfig.onlineFeaturesEnabled
-    val statusText = when {
-        isOffline -> "Offline"
-        isThinking -> "Thinking…"
-        isSpeaking -> "Speaking…"
-        else -> "Online"
+    val activeMode = remember(developerConfig.activeAssistantMode) {
+        AssistantEngineMode.fromConfigString(developerConfig.activeAssistantMode)
+    }
+    val isOffline = activeMode == AssistantEngineMode.MAYA_OFFLINE || !developerConfig.onlineFeaturesEnabled
+    val statusText = when (activeMode) {
+        AssistantEngineMode.SIMBA_TURBO_V2 -> "Locked 🔒"
+        AssistantEngineMode.TESSA_TURBO_V1 -> tessaUiStatus.displayLabel
+        AssistantEngineMode.MAYA_OFFLINE -> if (isThinking) "Thinking (Local GGUF)…" else "Offline (Qwen2.5)"
+        AssistantEngineMode.MAYA_ONLINE -> when {
+            isThinking -> "Thinking…"
+            isSpeaking -> "Speaking…"
+            else -> "Online"
+        }
+    }
+    val activeIdentityTitle = when (activeMode) {
+        AssistantEngineMode.TESSA_TURBO_V1 -> "TESSA Turbo V1"
+        AssistantEngineMode.SIMBA_TURBO_V2 -> "SIMBA Turbo V2 🔒"
+        else -> character.displayName
     }
 
     val faceMode = when {
@@ -250,13 +280,13 @@ fun ChatScreen(
                                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                                     ) {
                                         Text(
-                                            text = character.displayName,
+                                            text = activeIdentityTitle,
                                             color = TextPrimary,
                                             fontSize = 18.sp,
                                             fontWeight = FontWeight.Bold
                                         )
 
-                                        if (activeSpecialist != SpecialistType.GENERAL) {
+                                        if (activeMode == AssistantEngineMode.MAYA_ONLINE && activeSpecialist != SpecialistType.GENERAL) {
                                             SpecialistBadge(specialistType = activeSpecialist)
                                         }
                                     }
@@ -310,6 +340,18 @@ fun ChatScreen(
                     },
                     actions = {
                         if (!isSearchActive) {
+                            if (developerUnlocked) {
+                                IconButton(
+                                    onClick = onOpenDeveloperPanel,
+                                    modifier = Modifier.testTag("open_developer_panel_chat_button")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.DeveloperMode,
+                                        contentDescription = "Open Developer Panel",
+                                        tint = PurpleAccent
+                                    )
+                                }
+                            }
                             IconButton(
                                 onClick = { isVoiceCallActive = true },
                                 modifier = Modifier.testTag("start_voice_call_button")
@@ -341,6 +383,174 @@ fun ChatScreen(
                     .padding(innerPadding)
                     .imePadding()
             ) {
+                // Assistant Mode Selector Bar (MAYA Offline | MAYA Online | TESSA Turbo V1 | SIMBA Turbo V2 🔒)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(DarkSurface)
+                        .horizontalScroll(rememberScrollState())
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    AssistantEngineMode.entries.forEach { mode ->
+                        val selected = activeMode == mode
+                        FilterChip(
+                            selected = selected,
+                            onClick = { onSelectAssistantMode(mode) },
+                            label = {
+                                Text(
+                                    text = mode.displayName,
+                                    fontSize = 11.sp,
+                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
+                                )
+                            },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = when (mode) {
+                                    AssistantEngineMode.TESSA_TURBO_V1 -> PurpleAccent
+                                    AssistantEngineMode.SIMBA_TURBO_V2 -> DarkBorder
+                                    else -> accentColor
+                                },
+                                selectedLabelColor = TextPrimary,
+                                containerColor = DarkCard,
+                                labelColor = if (mode.isLocked) TextMuted else TextSecondary
+                            ),
+                            modifier = Modifier.testTag("mode_selector_${mode.modeId}")
+                        )
+                    }
+                }
+
+                // SIMBA Turbo V2 Locked State Banner
+                if (activeMode == AssistantEngineMode.SIMBA_TURBO_V2) {
+                    Surface(
+                        color = DarkCard,
+                        border = BorderStroke(1.dp, DarkBorder),
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 6.dp)
+                            .testTag("simba_locked_banner")
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text(
+                                text = "🔒 SIMBA Turbo V2 — Locked (Coming Soon)",
+                                color = TextPrimary,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "SIMBA Turbo V2 is reserved for a future major update. No AI model, tools, or background tasks are started while SIMBA is selected.",
+                                color = TextSecondary,
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
+                }
+
+                // TESSA Turbo V1 Live Task & Permission Banner
+                if (activeMode == AssistantEngineMode.TESSA_TURBO_V1) {
+                    val latestTask = tessaTasks.firstOrNull()
+                    Surface(
+                        color = DarkCard,
+                        border = BorderStroke(1.dp, PurpleAccent.copy(alpha = 0.5f)),
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 6.dp)
+                            .testTag("tessa_status_banner")
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "⚡ TESSA Turbo V1.2 • ${tessaUiStatus.displayLabel}",
+                                    color = PurpleAccent,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp
+                                )
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    FilledTonalButton(
+                                        onClick = { isTessaDiagnosticsDialogOpen = true },
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                        colors = ButtonDefaults.filledTonalButtonColors(containerColor = PurpleAccent.copy(alpha = 0.2f)),
+                                        modifier = Modifier.height(26.dp).testTag("open_tessa_diagnostics_button")
+                                    ) {
+                                        Text(
+                                            text = if (developerConfig.isTessaProviderConfigured()) "Diagnostics" else "Configure Provider",
+                                            color = if (developerConfig.isTessaProviderConfigured()) PurpleAccent else Color(0xFFFF9800),
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                    FilledTonalButton(
+                                        onClick = { isTessaComputerDialogOpen = true },
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                        modifier = Modifier.height(26.dp).testTag("open_tessa_computer_dialog_button")
+                                    ) {
+                                        Icon(Icons.Default.Computer, contentDescription = null, modifier = Modifier.size(12.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Computer Agent", fontSize = 10.sp)
+                                    }
+                                }
+                            }
+                            if (latestTask != null) {
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "Task ${latestTask.taskId.take(15)} • ${latestTask.taskType.name} • ${latestTask.status.name} (Step ${latestTask.currentStep}/${latestTask.totalSteps})",
+                                    color = TextPrimary,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                if (latestTask.status == TessaTaskState.WAITING_FOR_PERMISSION) {
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text(
+                                        text = "Permissions requested: ${latestTask.requiredPermissions.joinToString { it.name }}",
+                                        color = VermilionPrimary,
+                                        fontSize = 11.sp
+                                    )
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Button(
+                                            onClick = { onApproveTessaPermission(latestTask.taskId, false) },
+                                            colors = ButtonDefaults.buttonColors(containerColor = PurpleAccent),
+                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                            modifier = Modifier
+                                                .height(34.dp)
+                                                .testTag("tessa_approve_once_button")
+                                        ) {
+                                            Text("Approve Once", fontSize = 11.sp, color = TextPrimary)
+                                        }
+                                        OutlinedButton(
+                                            onClick = { onDenyTessaPermission(latestTask.taskId) },
+                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                            modifier = Modifier
+                                                .height(34.dp)
+                                                .testTag("tessa_deny_button")
+                                        ) {
+                                            Text("Deny", fontSize = 11.sp, color = ErrorRed)
+                                        }
+                                    }
+                                } else if (latestTask.status == TessaTaskState.RUNNING || latestTask.status == TessaTaskState.QUEUED) {
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    OutlinedButton(
+                                        onClick = { onCancelTessaTask(latestTask.taskId) },
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                        modifier = Modifier
+                                            .height(34.dp)
+                                            .testTag("tessa_cancel_task_button")
+                                    ) {
+                                        Text("Cancel Task", fontSize = 11.sp, color = ErrorRed)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // Search Banner Status
                 if (isSearchActive && searchQuery.isNotBlank()) {
                     Surface(
@@ -762,6 +972,31 @@ fun ChatScreen(
                 onDismiss = { isAppGameStudioActive = false },
                 onSendToChat = { projectMsg ->
                     onSendMessage(projectMsg, null, null)
+                }
+            )
+        }
+
+        if (isTessaComputerDialogOpen) {
+            com.cocateail.maya.ui.components.TessaComputerBrowserDialog(
+                pairedComputer = null,
+                activeTask = tessaTasks.firstOrNull(),
+                uiStatus = tessaUiStatus,
+                onDismiss = { isTessaComputerDialogOpen = false },
+                onApprovePermission = onApproveTessaPermission,
+                onDenyPermission = onDenyTessaPermission
+            )
+        }
+
+        if (isTessaDiagnosticsDialogOpen) {
+            com.cocateail.maya.ui.components.TessaDiagnosticsDialog(
+                config = developerConfig,
+                onDismiss = { isTessaDiagnosticsDialogOpen = false },
+                onOpenDeveloperConfig = {
+                    if (developerUnlocked) {
+                        onOpenDeveloperPanel()
+                    } else {
+                        onOpenSettings()
+                    }
                 }
             )
         }

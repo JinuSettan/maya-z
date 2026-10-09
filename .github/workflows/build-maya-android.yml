@@ -1,18 +1,24 @@
-name: Build MAYA Android APK
+name: Build MAYA Android APK & AAB
 
 on:
   push:
     branches:
       - main
+      - master
   workflow_dispatch:
+    inputs:
+      build_id:
+        description: 'Optional MAYA Build ID for correlation'
+        required: false
+        default: ''
 
 concurrency:
   group: maya-android-build-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  build-apk:
-    name: Build Android Release APK
+  build-android:
+    name: Build Android Release APK & AAB
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
@@ -30,7 +36,7 @@ jobs:
           java-version: '17'
           cache: 'gradle'
 
-      - name: Set up Android SDK, NDK & CMake
+      - name: Set up Android SDK 34, Build-Tools 34.0.0 & Optional NDK/CMake
         run: |
           export ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
           export ANDROID_SDK_ROOT="$ANDROID_HOME"
@@ -49,104 +55,115 @@ jobs:
           echo "Accepting Android SDK licenses..."
           yes | "$SDKMANAGER" --licenses > /dev/null || true
 
-          echo "Installing Android SDK 34, Build-Tools 34.0.0, CMake 3.22.1, and NDK 26.1.10909125..."
+          echo "Installing Android SDK 34 and Build-Tools 34.0.0..."
           "$SDKMANAGER" --install \
             "platforms;android-34" \
-            "build-tools;34.0.0" \
-            "cmake;3.22.1" \
-            "ndk;26.1.10909125"
+            "build-tools;34.0.0"
 
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq ninja-build
+          if find . -name "CMakeLists.txt" -o -name "*.cpp" | grep -q .; then
+            echo "Native C++/CMake sources detected. Installing NDK 26.1.10909125, CMake 3.22.1, and ninja-build..."
+            "$SDKMANAGER" --install \
+              "cmake;3.22.1" \
+              "ndk;26.1.10909125"
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq ninja-build
+          fi
 
-      - name: Set up pnpm
+      - name: Set up Node & pnpm (only if package.json exists)
+        if: hashFiles('package.json') != ''
         uses: pnpm/action-setup@v4
         with:
           version: 9
 
-      - name: Set up Node.js 20
+      - name: Set up Node.js 20 (only if package.json exists)
+        if: hashFiles('package.json') != ''
         uses: actions/setup-node@v4
         with:
           node-version: 20
 
-      - name: Install Node & pnpm dependencies
+      - name: Install Node dependencies (only if package.json exists)
+        if: hashFiles('package.json') != ''
         run: |
-          pnpm install --no-frozen-lockfile
+          if [ -f "package.json" ]; then
+            pnpm install --no-frozen-lockfile
+          fi
 
-      - name: Print Build Environment Diagnostics
+      - name: Prepare Gradle Wrapper & Signing Keystore
         run: |
-          echo "=========================================="
-          echo "     MAYA CI/CD BUILD DIAGNOSTICS         "
-          echo "=========================================="
-          echo "Java version:"
-          java -version
-          echo "------------------------------------------"
-          echo "Node version:"
-          node -v
-          echo "pnpm version:"
-          pnpm -v
-          echo "------------------------------------------"
-          echo "Android SDK root: $ANDROID_HOME"
-          echo "Android SDK platforms:"
-          ls -la "$ANDROID_HOME/platforms" || true
-          echo "Android SDK build-tools:"
-          ls -la "$ANDROID_HOME/build-tools" || true
-          echo "Android NDK installations:"
-          ls -la "$ANDROID_HOME/ndk" || true
-          echo "CMake installations:"
-          ls -la "$ANDROID_HOME/cmake" || true
-          cmake --version || true
-          echo "------------------------------------------"
-          echo "Gradle wrapper setup:"
           chmod +x ./gradlew
           ./gradlew --version
-          echo "=========================================="
+          if [ ! -f "debug.keystore" ] && [ -f "debug.keystore.base64" ]; then
+            echo "Restoring debug.keystore from debug.keystore.base64..."
+            base64 -d debug.keystore.base64 > debug.keystore
+          elif [ ! -f "debug.keystore" ]; then
+            echo "Generating release-compatible signing keystore debug.keystore..."
+            keytool -genkeypair -v \
+              -keystore debug.keystore \
+              -storepass android \
+              -alias androiddebugkey \
+              -keypass android \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
+          fi
 
-      - name: Build Release APK using Gradle
+      - name: Build Release APK and AAB
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
-          echo "Starting real Gradle build for MAYA Android..."
+          echo "Building Android Release APK (./gradlew assembleRelease)..."
           ./gradlew assembleRelease --stacktrace
 
-      - name: Locate, Verify and Inspect APK
-        id: verify_apk
+          echo "Building Android Release App Bundle (./gradlew bundleRelease)..."
+          ./gradlew bundleRelease --stacktrace
+
+      - name: Locate, Verify and Hash Both APK and AAB Artifacts
+        id: verify_artifacts
         run: |
-          echo "=========================================="
-          echo "      LOCATING GENERATED ANDROID APK      "
-          echo "=========================================="
-          
-          # Find real .apk file generated by Gradle
-          APK_FILE=$(find app/build/outputs/apk -type f -name "*.apk" | head -n 1)
-          
+          APK_FILE=$(find app/build/outputs/apk -type f -name "*-unsigned.apk" -prune -o -type f -name "*.apk" -print | head -n 1)
           if [ -z "$APK_FILE" ]; then
-            echo "::error::CRITICAL FAILURE: No APK file was found in app/build/outputs/apk!"
-            echo "Contents of app/build/outputs:"
+            APK_FILE=$(find app/build/outputs/apk -type f -name "*.apk" | head -n 1)
+          fi
+          AAB_FILE=$(find app/build/outputs/bundle -type f -name "*.aab" | head -n 1)
+
+          if [ -z "$APK_FILE" ] || [ ! -f "$APK_FILE" ] || [ ! -s "$APK_FILE" ]; then
+            echo "::error::CRITICAL FAILURE: Release APK artifact is missing or 0 bytes!"
             ls -laR app/build/outputs || true
             exit 1
           fi
-          
-          if [ ! -s "$APK_FILE" ]; then
-            echo "::error::CRITICAL FAILURE: Found APK file '$APK_FILE' is 0 bytes!"
+
+          if [ -z "$AAB_FILE" ] || [ ! -f "$AAB_FILE" ] || [ ! -s "$AAB_FILE" ]; then
+            echo "::error::CRITICAL FAILURE: Release AAB artifact is missing or 0 bytes!"
+            ls -laR app/build/outputs || true
             exit 1
           fi
-          
-          FILE_SIZE=$(stat -c%s "$APK_FILE" 2>/dev/null || stat -f%z "$APK_FILE")
-          HUMAN_SIZE=$(ls -lh "$APK_FILE" | awk '{print $5}')
-          
-          echo "✅ Real APK successfully generated!"
-          echo "File Path: $APK_FILE"
-          echo "File Size: $FILE_SIZE bytes ($HUMAN_SIZE)"
-          echo "SHA256:   $(sha256sum "$APK_FILE" | awk '{print $1}')"
-          
-          echo "apk_path=$APK_FILE" >> $GITHUB_OUTPUT
-          echo "apk_filename=$(basename "$APK_FILE")" >> $GITHUB_OUTPUT
-          echo "apk_size=$HUMAN_SIZE" >> $GITHUB_OUTPUT
 
-      - name: Upload APK as GitHub Actions Artifact
+          APK_SIZE=$(stat -c%s "$APK_FILE" 2>/dev/null || stat -f%z "$APK_FILE")
+          AAB_SIZE=$(stat -c%s "$AAB_FILE" 2>/dev/null || stat -f%z "$AAB_FILE")
+          APK_SHA256=$(sha256sum "$APK_FILE" | awk '{print $1}')
+          AAB_SHA256=$(sha256sum "$AAB_FILE" | awk '{print $1}')
+
+          echo "✅ Verified APK: $APK_FILE ($APK_SIZE bytes, SHA-256: $APK_SHA256)"
+          echo "✅ Verified AAB: $AAB_FILE ($AAB_SIZE bytes, SHA-256: $AAB_SHA256)"
+
+          echo "apk_path=$APK_FILE" >> $GITHUB_OUTPUT
+          echo "apk_sha256=$APK_SHA256" >> $GITHUB_OUTPUT
+          echo "aab_path=$AAB_FILE" >> $GITHUB_OUTPUT
+          echo "aab_sha256=$AAB_SHA256" >> $GITHUB_OUTPUT
+
+      - name: Upload APK Artifact (maya-apk)
         uses: actions/upload-artifact@v4
         with:
-          name: maya-android-apk
-          path: ${{ steps.verify_apk.outputs.apk_path }}
+          name: maya-apk
+          path: ${{ steps.verify_artifacts.outputs.apk_path }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload AAB Artifact (maya-aab)
+        uses: actions/upload-artifact@v4
+        with:
+          name: maya-aab
+          path: ${{ steps.verify_artifacts.outputs.aab_path }}
           if-no-files-found: error
           retention-days: 14

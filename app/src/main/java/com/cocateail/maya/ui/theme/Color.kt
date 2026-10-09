@@ -26,3 +26,4 @@ val CodeText = Color(0xFFE6EDF3)
 
 val SuccessGreen = Color(0xFF00E676)
 val ErrorRed = Color(0xFFFF5252)
+val WarningOrange = Color(0xFFFF9100)

@@ -9,6 +9,24 @@ android {
     namespace = "com.cocateail.maya"
     compileSdk = 34
 
+    val sdkRootDir = file(System.getenv("ANDROID_SDK_ROOT") ?: System.getenv("ANDROID_HOME") ?: "/opt/android/sdk")
+    val ndkParentDir = File(sdkRootDir, "ndk")
+    if (ndkParentDir.exists()) {
+        ndkParentDir.listFiles()?.forEach { dir ->
+            if (dir.isDirectory && !File(dir, "source.properties").exists()) {
+                runCatching { dir.deleteRecursively() }
+            }
+        }
+    }
+    val validNdkDir = ndkParentDir.takeIf { it.exists() }
+        ?.listFiles()
+        ?.filter { it.isDirectory && File(it, "source.properties").exists() && File(it, "toolchains").exists() }
+        ?.maxByOrNull { it.name }
+
+    if (validNdkDir != null) {
+        ndkVersion = validNdkDir.name
+    }
+
     defaultConfig {
         applicationId = "com.aistudio.mayaz.aichat"
         minSdk = 24
@@ -21,23 +39,28 @@ android {
             useSupportLibrary = true
         }
 
-        ndk {
-            abiFilters.add("arm64-v8a")
-        }
+        if (validNdkDir != null) {
+            ndk {
+                abiFilters.add("arm64-v8a")
+            }
 
-        externalNativeBuild {
-            cmake {
-                cppFlags("")
+            externalNativeBuild {
+                cmake {
+                    cppFlags("")
+                }
             }
         }
 
         buildConfigField("String", "GEMINI_API_KEY", "\"${project.findProperty("GEMINI_API_KEY") ?: System.getenv("GEMINI_API_KEY") ?: ""}\"")
+        buildConfigField("String", "TESSA_API_KEY", "\"${project.findProperty("TESSA_API_KEY") ?: System.getenv("TESSA_API_KEY") ?: ""}\"")
     }
 
-    externalNativeBuild {
-        cmake {
-            path = file("src/main/cpp/CMakeLists.txt")
-            version = "3.22.1"
+    if (validNdkDir != null) {
+        externalNativeBuild {
+            cmake {
+                path = file("src/main/cpp/CMakeLists.txt")
+                version = "3.22.1"
+            }
         }
     }
 
@@ -113,6 +136,9 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.androidx.work.runtime.ktx)
+
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20231013")
 
     debugImplementation(libs.androidx.ui.tooling)
 }

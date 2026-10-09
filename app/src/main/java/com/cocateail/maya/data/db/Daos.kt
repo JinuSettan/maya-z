@@ -47,3 +47,31 @@ interface MessageDao {
     @Query("DELETE FROM messages WHERE conversationId = :conversationId")
     suspend fun deleteMessagesForConversation(conversationId: String)
 }
+
+@Dao
+interface TessaTaskDao {
+    @Query("SELECT * FROM tessa_tasks ORDER BY updatedAt DESC")
+    fun observeAllTasks(): Flow<List<TessaTaskEntity>>
+
+    @Query("SELECT * FROM tessa_tasks ORDER BY updatedAt DESC")
+    suspend fun getAllTasksOnce(): List<TessaTaskEntity>
+
+    @Query("SELECT * FROM tessa_tasks WHERE taskId = :taskId LIMIT 1")
+    suspend fun getTaskById(taskId: String): TessaTaskEntity?
+
+    @Query("SELECT * FROM tessa_tasks WHERE relatedProject = :projectName ORDER BY updatedAt DESC LIMIT 1")
+    suspend fun getLatestTaskForProject(projectName: String): TessaTaskEntity?
+
+    @Query("SELECT * FROM tessa_tasks WHERE status IN ('QUEUED', 'RUNNING', 'WAITING_FOR_PERMISSION', 'PAUSED') ORDER BY updatedAt DESC")
+    suspend fun getActiveTasksOnce(): List<TessaTaskEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertTask(task: TessaTaskEntity)
+
+    @Update
+    suspend fun updateTask(task: TessaTaskEntity)
+
+    @Query("DELETE FROM tessa_tasks WHERE taskId = :taskId")
+    suspend fun deleteTaskById(taskId: String)
+}
+

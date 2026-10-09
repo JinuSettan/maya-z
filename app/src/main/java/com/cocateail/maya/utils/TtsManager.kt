@@ -16,26 +16,32 @@ class TtsManager(context: Context) {
     val isSpeaking: StateFlow<Boolean> = _isSpeaking.asStateFlow()
 
     init {
-        tts = TextToSpeech(context.applicationContext) { status ->
-            if (status == TextToSpeech.SUCCESS) {
-                tts?.language = Locale.US
-                isInitialized = true
+        try {
+            val appCtx = context.applicationContext ?: context
+            tts = TextToSpeech(appCtx) { status ->
+                if (status == TextToSpeech.SUCCESS) {
+                    tts?.language = Locale.US
+                    isInitialized = true
+                }
             }
+            tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                override fun onStart(utteranceId: String?) {
+                    _isSpeaking.value = true
+                }
+
+                override fun onDone(utteranceId: String?) {
+                    _isSpeaking.value = false
+                }
+
+                @Deprecated("Deprecated in Java")
+                override fun onError(utteranceId: String?) {
+                    _isSpeaking.value = false
+                }
+            })
+        } catch (_: Throwable) {
+            tts = null
+            isInitialized = false
         }
-        tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-            override fun onStart(utteranceId: String?) {
-                _isSpeaking.value = true
-            }
-
-            override fun onDone(utteranceId: String?) {
-                _isSpeaking.value = false
-            }
-
-            @Deprecated("Deprecated in Java")
-            override fun onError(utteranceId: String?) {
-                _isSpeaking.value = false
-            }
-        })
     }
 
     fun speak(text: String, rate: Float = 0.98f, pitch: Float = 1.05f) {

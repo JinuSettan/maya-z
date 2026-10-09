@@ -41,56 +41,65 @@ fun MayaFaceView(
 ) {
     if (!enabled) return
 
-    // Bobbing animation
-    val infiniteTransition = rememberInfiniteTransition(label = "maya_face_bob")
-    val bobOffset by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = when (mode) {
-            FaceMode.THINKING -> -4f
-            FaceMode.SPEAKING -> 2f
-            FaceMode.HAPPY -> -3f
-            FaceMode.OFFLINE -> 0f
-            else -> 1.5f
-        },
-        animationSpec = infiniteRepeatable(
-            animation = tween(
-                durationMillis = when (mode) {
-                    FaceMode.THINKING -> 500
-                    FaceMode.SPEAKING -> 350
-                    FaceMode.HAPPY -> 600
-                    else -> 1400
-                },
-                easing = FastOutSlowInEasing
-            ),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "bob_offset"
-    )
+    val isAnimatedMode = mode == FaceMode.THINKING || mode == FaceMode.SPEAKING || mode == FaceMode.HAPPY
 
-    // Pulsing aura scale for Thinking & Speaking
-    val auraScale by infiniteTransition.animateFloat(
-        initialValue = 1.0f,
-        targetValue = if (mode == FaceMode.THINKING || mode == FaceMode.SPEAKING) 1.15f else 1.02f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(
-                durationMillis = if (mode == FaceMode.THINKING) 600 else 800,
-                easing = LinearEasing
-            ),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "aura_scale"
-    )
+    val bobOffset: Float
+    val auraScale: Float
+    val mouthSpeakHeight: Float
 
-    // Mouth jaw animation when speaking
-    val mouthSpeakHeight by infiniteTransition.animateFloat(
-        initialValue = 3f,
-        targetValue = 12f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(180, easing = LinearOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "speak_height"
-    )
+    if (isAnimatedMode) {
+        val infiniteTransition = rememberInfiniteTransition(label = "maya_face_bob")
+        val animBob by infiniteTransition.animateFloat(
+            initialValue = 0f,
+            targetValue = when (mode) {
+                FaceMode.THINKING -> -4f
+                FaceMode.SPEAKING -> 2f
+                FaceMode.HAPPY -> -3f
+                else -> 0f
+            },
+            animationSpec = infiniteRepeatable(
+                animation = tween(
+                    durationMillis = when (mode) {
+                        FaceMode.THINKING -> 500
+                        FaceMode.SPEAKING -> 350
+                        FaceMode.HAPPY -> 600
+                        else -> 1000
+                    },
+                    easing = FastOutSlowInEasing
+                ),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "bob_offset"
+        )
+        val animAura by infiniteTransition.animateFloat(
+            initialValue = 1.0f,
+            targetValue = if (mode == FaceMode.THINKING || mode == FaceMode.SPEAKING) 1.15f else 1.02f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(
+                    durationMillis = if (mode == FaceMode.THINKING) 600 else 800,
+                    easing = LinearEasing
+                ),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "aura_scale"
+        )
+        val animMouth by infiniteTransition.animateFloat(
+            initialValue = 3f,
+            targetValue = 12f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(180, easing = LinearOutSlowInEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "speak_height"
+        )
+        bobOffset = animBob
+        auraScale = animAura
+        mouthSpeakHeight = animMouth
+    } else {
+        bobOffset = 0f
+        auraScale = 1.0f
+        mouthSpeakHeight = 5f
+    }
 
     // Blinking
     var isBlinking by remember { mutableStateOf(false) }

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <files-path
+        name="downloaded_artifacts"
+        path="artifacts/" />
+    <cache-path
+        name="cached_artifacts"
+        path="artifacts/" />
+    <external-files-path
+        name="external_artifacts"
+        path="artifacts/" />
+</paths>

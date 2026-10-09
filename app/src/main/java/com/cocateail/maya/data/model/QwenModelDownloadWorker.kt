@@ -100,6 +100,7 @@ class QwenModelDownloadWorker(
                 val buffer = ByteArray(64 * 1024)
                 var bytesRead: Int
                 var bytesWrittenSinceUpdate = 0L
+                var lastReportedPercent = -1
 
                 while (inputStream.read(buffer).also { bytesRead = it } != -1) {
                     if (isStopped) {
@@ -109,10 +110,13 @@ class QwenModelDownloadWorker(
                     outputStream.write(buffer, 0, bytesRead)
                     bytesWrittenSinceUpdate += bytesRead
 
-                    if (bytesWrittenSinceUpdate >= 256 * 1024) {
+                    if (bytesWrittenSinceUpdate >= 1024 * 1024) {
                         val currentTotal = partFile.length()
                         val percent = ((currentTotal * 100) / ModelDownloadManager.EXPECTED_SIZE_BYTES).toInt().coerceIn(0, 99)
-                        ModelDownloadManager.updateProgress(currentTotal, percent)
+                        if (percent != lastReportedPercent) {
+                            lastReportedPercent = percent
+                            ModelDownloadManager.updateProgress(currentTotal, percent)
+                        }
                         bytesWrittenSinceUpdate = 0L
                     }
                 }

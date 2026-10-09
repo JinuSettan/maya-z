@@ -42,6 +42,12 @@ object ModelDownloadManager {
     private val _downloadInfo = MutableStateFlow(ModelDownloadInfo())
     val downloadInfo: StateFlow<ModelDownloadInfo> = _downloadInfo.asStateFlow()
 
+    @Volatile
+    private var verifiedFileLength: Long = -1L
+
+    @Volatile
+    private var verifiedFileLastModified: Long = -1L
+
     fun getModelsDirectory(context: Context): File {
         val dir = File(context.filesDir, "models")
         if (!dir.exists()) {
@@ -139,16 +145,29 @@ object ModelDownloadManager {
         if (modelFile.length() != EXPECTED_SIZE_BYTES) {
             Log.w(TAG, "Existing model size mismatch (Got: ${modelFile.length()}, Expected: $EXPECTED_SIZE_BYTES). Deleting corrupt file.")
             modelFile.delete()
+            verifiedFileLength = -1L
+            verifiedFileLastModified = -1L
             markStatusFailed("Model file corrupted")
             return false
+        }
+
+        val currentLength = modelFile.length()
+        val currentModified = modelFile.lastModified()
+        if (verifiedFileLength == currentLength && verifiedFileLastModified == currentModified && currentLength == EXPECTED_SIZE_BYTES) {
+            markStatusReady()
+            return true
         }
 
         val hash = calculateSha256(modelFile)
         val matches = hash.equals(EXPECTED_SHA256, ignoreCase = true)
         if (matches) {
+            verifiedFileLength = currentLength
+            verifiedFileLastModified = currentModified
             Log.d(TAG, "model ready (Size & SHA-256 verified)")
             markStatusReady()
         } else {
+            verifiedFileLength = -1L
+            verifiedFileLastModified = -1L
             Log.w(TAG, "Existing model SHA-256 mismatch (Got: $hash). Deleting corrupt file.")
             modelFile.delete()
             markStatusFailed("SHA-256 Verification Failed")
@@ -157,7 +176,8 @@ object ModelDownloadManager {
     }
 
     /**
-     * Enqueues a silent WorkManager background task if the verified GGUF model is not yet present.
+     * Checks existing model state in the background without blocking startup or starting
+     * an unrequested 428MB download that can stall the emulator.
      */
     fun initAndEnqueueDownload(context: Context) {
         val modelFile = getModelFile(context)
@@ -167,9 +187,15 @@ object ModelDownloadManager {
                 Log.d(TAG, "model ready")
                 return
             }
+        } else {
+            val partFile = getPartFile(context)
+            if (!partFile.exists() || partFile.length() == 0L) {
+                _downloadInfo.value = ModelDownloadInfo(
+                    status = ModelStatus.NOT_AVAILABLE,
+                    statusMessage = "Not Downloaded"
+                )
+            }
         }
-
-        triggerManualDownload(context, ExistingWorkPolicy.KEEP)
     }
 
     /**

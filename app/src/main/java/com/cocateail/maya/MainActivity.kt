@@ -49,8 +49,10 @@ class MainActivity : ComponentActivity() {
                     val isThinking by viewModel.isThinking.collectAsState()
                     val isSpeaking by viewModel.isSpeaking.collectAsState()
                     val activeReplyToMessage by viewModel.activeReplyToMessage.collectAsState()
+                    val tessaTasks by viewModel.tessaTasks.collectAsState()
+                    val tessaUiStatus by viewModel.tessaUiStatus.collectAsState()
 
-                    var showDeveloperPanel by remember { mutableStateOf(false) }
+                    val showDeveloperPanel by viewModel.showDeveloperPanel.collectAsState()
 
                     if (!brainReady) {
                         BrainSetupView(
@@ -58,7 +60,7 @@ class MainActivity : ComponentActivity() {
                             isReady = brainReady,
                             error = brainError,
                             onRetry = { viewModel.initializeBrain() },
-                            onStart = { }
+                            onStart = { viewModel.initializeBrain() }
                         )
                     } else {
                         NavHost(navController = navController, startDestination = "chat") {
@@ -69,9 +71,18 @@ class MainActivity : ComponentActivity() {
                                     messages = messages,
                                     character = character,
                                     developerConfig = developerConfig,
+                                    developerUnlocked = developerUnlocked,
                                     isThinking = isThinking,
                                     isSpeaking = isSpeaking,
                                     activeReplyToMessage = activeReplyToMessage,
+                                    tessaTasks = tessaTasks,
+                                    tessaUiStatus = tessaUiStatus,
+                                    onSelectAssistantMode = { mode -> viewModel.selectAssistantMode(mode) },
+                                    onApproveTessaPermission = { taskId, reusable ->
+                                        viewModel.approveTessaPermission(taskId, reusable)
+                                    },
+                                    onDenyTessaPermission = { taskId -> viewModel.denyTessaPermission(taskId) },
+                                    onCancelTessaTask = { taskId -> viewModel.cancelTessaTask(taskId) },
                                     onReplyToMessage = { msg -> viewModel.setReplyToMessage(msg) },
                                     onSendMessage = { text, bmp, url ->
                                         viewModel.sendMessage(text, bmp, url)
@@ -84,6 +95,7 @@ class MainActivity : ComponentActivity() {
                                     onDeleteConversation = { id -> viewModel.deleteConversation(id) },
                                     onPinMessage = { id, pinned -> viewModel.togglePinMessage(id, pinned) },
                                     onSpeakMessage = { text -> viewModel.speakMessage(text) },
+                                    onOpenDeveloperPanel = { viewModel.openDeveloperPanel() },
                                     onOpenSettings = { navController.navigate("settings") }
                                 )
                             }
@@ -93,16 +105,16 @@ class MainActivity : ComponentActivity() {
                                     selectedCharacter = character,
                                     developerUnlocked = developerUnlocked,
                                     onSelectCharacter = { char -> viewModel.selectCharacter(char) },
-                                    onOpenDeveloperPanel = { showDeveloperPanel = true },
+                                    onOpenDeveloperPanel = { viewModel.openDeveloperPanel() },
                                     onBack = { navController.popBackStack() }
                                 )
                             }
                         }
 
-                        if (showDeveloperPanel) {
+                        if (showDeveloperPanel && developerUnlocked) {
                             DeveloperPanelDialog(
                                 config = developerConfig,
-                                onDismiss = { showDeveloperPanel = false },
+                                onDismiss = { viewModel.dismissDeveloperPanel() },
                                 onSave = { newConfig -> viewModel.saveDeveloperConfig(newConfig) }
                             )
                         }

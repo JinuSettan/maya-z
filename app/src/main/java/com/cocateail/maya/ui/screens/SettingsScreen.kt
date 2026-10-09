@@ -165,7 +165,9 @@ fun SettingsScreen(
             val downloadInfo by ModelDownloadManager.downloadInfo.collectAsState()
 
             LaunchedEffect(Unit) {
-                ModelDownloadManager.isModelReady(context)
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    ModelDownloadManager.isModelReady(context)
+                }
             }
 
             Card(
@@ -282,10 +284,12 @@ fun SettingsScreen(
                 Text("Developer Options", color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
             }
             Text(
-                text = if (developerUnlocked) "Developer controls & specialist overrides are active." else "Type /developerceo/maya/unlockcode/trainer in chat to unlock developer controls.",
-                color = TextSecondary,
+                text = if (developerUnlocked) "Developer Mode Unlocked — Developer controls, Specialist overrides & TESSA Provider settings are active." else "Type /developerceo/maya/unlockcode/trainer in chat to unlock developer controls.",
+                color = if (developerUnlocked) SuccessGreen else TextSecondary,
                 fontSize = 14.sp,
-                modifier = Modifier.padding(top = 4.dp, bottom = 16.dp)
+                modifier = Modifier
+                    .padding(top = 4.dp, bottom = 16.dp)
+                    .testTag("developer_options_status_text")
             )
 
             if (developerUnlocked) {

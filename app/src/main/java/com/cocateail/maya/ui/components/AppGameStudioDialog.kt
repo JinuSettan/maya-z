@@ -12,6 +12,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -54,14 +55,17 @@ data class ProjectFile(
     val name: String,
     val path: String,
     val content: String,
-    val isFolder: Boolean = false
+    val isFolder: Boolean = false,
+    val isBinary: Boolean = false,
+    val base64Content: String? = null
 )
 
 data class GeneratedProject(
     val title: String,
     val category: String,
     val files: List<ProjectFile>,
-    val mainHtmlContent: String
+    val mainHtmlContent: String,
+    val projectType: String = "WEB"
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -209,24 +213,19 @@ fun AppGameStudioDialog(
                                 isBuilding = true
                                 coroutineScope.launch {
                                     try {
-                                        val projectType = when {
-                                            prompt.lowercase().contains("photo") || prompt.lowercase().contains("edit") || prompt.lowercase().contains("image") || prompt.lowercase().contains("filter") ->
-                                                com.cocateail.maya.studio.BuilderProjectType.PHOTO_EDITOR
-                                            prompt.lowercase().contains("game") || prompt.lowercase().contains("3d") || prompt.lowercase().contains("physics") ->
-                                                com.cocateail.maya.studio.BuilderProjectType.GAME_3D
-                                            else ->
-                                                com.cocateail.maya.studio.BuilderProjectType.WEB_APP
-                                        }
+                                        val projectType = com.cocateail.maya.studio.BuilderAgent.classifyProjectType(prompt)
 
-                                        val newProject = builderAgent.executeTask(prompt, projectType) { status, text, iter ->
-                                            builderStatus = status
-                                            builderStatusText = text
-                                            builderIteration = iter
+                                        val newProject = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                            builderAgent.executeTask(prompt, projectType) { status, text, iter ->
+                                                builderStatus = status
+                                                builderStatusText = text
+                                                builderIteration = iter
+                                            }
                                         }
 
                                         currentProject = newProject
                                         selectedFile = newProject.files.firstOrNull()
-                                        activeTab = 1 // Switch to Live Sandbox
+                                        activeTab = if (projectType == com.cocateail.maya.studio.BuilderProjectType.ANDROID_APP) 2 else 1
                                     } catch (e: Exception) {
                                         e.printStackTrace()
                                         Toast.makeText(context, "Builder Error: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
@@ -262,7 +261,8 @@ fun AppGameStudioDialog(
                             project = currentProject,
                             selectedFile = selectedFile,
                             onSelectFile = { selectedFile = it },
-                            accentColor = accentColor
+                            accentColor = accentColor,
+                            onPushToGit = { isGitStudioActive = true }
                         )
                     }
                 }
@@ -562,7 +562,8 @@ private fun FileTreeAndCodeTab(
     project: GeneratedProject?,
     selectedFile: ProjectFile?,
     onSelectFile: (ProjectFile) -> Unit,
-    accentColor: Color
+    accentColor: Color,
+    onPushToGit: () -> Unit = {}
 ) {
     val context = LocalContext.current
     if (project == null) {
@@ -573,7 +574,22 @@ private fun FileTreeAndCodeTab(
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        Text("📁 Project Files Structure (${project.files.size} Files)", color = TextPrimary, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("📁 Project Files Structure (${project.files.size} Files)", color = TextPrimary, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+            OutlinedButton(
+                onClick = onPushToGit,
+                shape = RoundedCornerShape(10.dp),
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+            ) {
+                Icon(Icons.Default.CloudUpload, contentDescription = "Push & Build on GitHub", tint = accentColor, modifier = Modifier.size(14.dp))
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Push & Build on GitHub", color = accentColor, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            }
+        }
         Spacer(modifier = Modifier.height(6.dp))
 
         // File Explorer Chips / List
@@ -582,6 +598,7 @@ private fun FileTreeAndCodeTab(
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(10.dp))
                 .background(DarkCard)
+                .horizontalScroll(rememberScrollState())
                 .padding(6.dp),
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
@@ -604,7 +621,7 @@ private fun FileTreeAndCodeTab(
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = file.name,
+                            text = file.path,
                             color = if (isSelected) TextPrimary else TextSecondary,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.SemiBold
@@ -660,15 +677,34 @@ private fun FileTreeAndCodeTab(
 
 private fun exportProjectToDownloads(context: Context, project: GeneratedProject) {
     try {
-        val fileName = "${project.title.replace(" ", "_")}_project.html"
         val downloadDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
-        val file = File(downloadDir, fileName)
-
-        FileOutputStream(file).use { out ->
-            out.write(project.mainHtmlContent.toByteArray())
+        downloadDir.mkdirs()
+        if (project.projectType == "ANDROID_APP" || project.mainHtmlContent.isBlank()) {
+            val zipFileName = "${project.title.replace(Regex("[^A-Za-z0-9_.-]"), "_")}_android_project.zip"
+            val zipFile = File(downloadDir, zipFileName)
+            java.util.zip.ZipOutputStream(FileOutputStream(zipFile)).use { zos ->
+                project.files.forEach { pf ->
+                    if (!pf.isFolder && com.cocateail.maya.studio.BuildSecurityValidator.isSafeRelativePath(pf.path)) {
+                        zos.putNextEntry(java.util.zip.ZipEntry(pf.path))
+                        val bytes = if (pf.isBinary && !pf.base64Content.isNullOrBlank()) {
+                            java.util.Base64.getDecoder().decode(pf.base64Content)
+                        } else {
+                            pf.content.toByteArray(Charsets.UTF_8)
+                        }
+                        zos.write(bytes)
+                        zos.closeEntry()
+                    }
+                }
+            }
+            Toast.makeText(context, "📦 Exported Android project ZIP to Downloads: $zipFileName", Toast.LENGTH_LONG).show()
+        } else {
+            val fileName = "${project.title.replace(" ", "_")}_project.html"
+            val file = File(downloadDir, fileName)
+            FileOutputStream(file).use { out ->
+                out.write(project.mainHtmlContent.toByteArray())
+            }
+            Toast.makeText(context, "📦 Exported project to Downloads: $fileName", Toast.LENGTH_LONG).show()
         }
-
-        Toast.makeText(context, "📦 Exported project to Downloads: $fileName", Toast.LENGTH_LONG).show()
     } catch (e: Exception) {
         e.printStackTrace()
         Toast.makeText(context, "Export error: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
