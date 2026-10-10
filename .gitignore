@@ -64,6 +64,9 @@ app/build/
 .cxx/
 app/.cxx/
 local.properties
+.env
+.env.*
+!.env.example
 Captures/
 *.hprof
 .externalNativeBuild/
