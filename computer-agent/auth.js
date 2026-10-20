@@ -1,15 +1,13 @@
+
 const crypto = require('crypto');
 
 function safeEqual(a, b) {
-  if (typeof a !== 'string' || typeof b !== 'string') {
-    return false;
-  }
+  if (typeof a !== 'string' || typeof b !== 'string') return false;
 
   const left = Buffer.from(a, 'utf8');
   const right = Buffer.from(b, 'utf8');
 
   if (left.length !== right.length) return false;
-
   return crypto.timingSafeEqual(left, right);
 }
 
@@ -18,8 +16,6 @@ class AuthManager {
     this.pairedComputers = new Map();
     this.activeSessions = new Map();
 
-    // Configure TESSA_PAIRING_TOKEN to use a persistent token.
-    // Otherwise a fresh token is generated for each server start.
     this.expectedPairingToken =
       process.env.TESSA_PAIRING_TOKEN ||
       crypto.randomBytes(24).toString('hex');
@@ -55,10 +51,14 @@ class AuthManager {
       computerId,
       deviceName: String(deviceName || 'Host Computer').slice(0, 100),
       sessionToken,
+
+      // Used internally to verify signed requests.
+      // Never return this field in an API response.
+      pairingToken,
+
       lastSeen: Date.now()
     };
 
-    // Revoke an old session if this computer pairs again.
     const previous = this.pairedComputers.get(computerId);
 
     if (previous) {
@@ -110,8 +110,9 @@ class AuthManager {
   }
 
   revoke(sessionToken) {
-    const computerId = this.activeSessions.get(sessionToken);
+    if (typeof sessionToken !== 'string') return false;
 
+    const computerId = this.activeSessions.get(sessionToken);
     if (!computerId) return false;
 
     this.activeSessions.delete(sessionToken);
