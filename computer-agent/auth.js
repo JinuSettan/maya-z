@@ -1,48 +1,123 @@
 const crypto = require('crypto');
 
+function safeEqual(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string') {
+    return false;
+  }
+
+  const left = Buffer.from(a, 'utf8');
+  const right = Buffer.from(b, 'utf8');
+
+  if (left.length !== right.length) return false;
+
+  return crypto.timingSafeEqual(left, right);
+}
+
 class AuthManager {
   constructor() {
     this.pairedComputers = new Map();
     this.activeSessions = new Map();
+
+    // Configure TESSA_PAIRING_TOKEN to use a persistent token.
+    // Otherwise a fresh token is generated for each server start.
+    this.expectedPairingToken =
+      process.env.TESSA_PAIRING_TOKEN ||
+      crypto.randomBytes(24).toString('hex');
+
+    if (!process.env.TESSA_PAIRING_TOKEN) {
+      console.log('\n======================================');
+      console.log('TESSA PAIRING TOKEN (keep it private):');
+      console.log(this.expectedPairingToken);
+      console.log('======================================\n');
+    }
+  }
+
+  isValidPairingToken(token) {
+    return safeEqual(token, this.expectedPairingToken);
   }
 
   pair(computerId, deviceName, pairingToken) {
-    const sessionToken = 'sess_' + crypto.randomBytes(16).toString('hex');
-    this.pairedComputers.set(computerId, {
+    if (!this.isValidPairingToken(pairingToken)) {
+      throw new Error('Invalid pairing token');
+    }
+
+    if (
+      typeof computerId !== 'string' ||
+      !/^[a-zA-Z0-9._-]{1,100}$/.test(computerId)
+    ) {
+      throw new Error('Invalid computer ID');
+    }
+
+    const sessionToken =
+      'sess_' + crypto.randomBytes(32).toString('hex');
+
+    const computer = {
       computerId,
-      deviceName,
-      pairingToken,
+      deviceName: String(deviceName || 'Host Computer').slice(0, 100),
       sessionToken,
       lastSeen: Date.now()
-    });
+    };
+
+    // Revoke an old session if this computer pairs again.
+    const previous = this.pairedComputers.get(computerId);
+
+    if (previous) {
+      this.activeSessions.delete(previous.sessionToken);
+    }
+
+    this.pairedComputers.set(computerId, computer);
     this.activeSessions.set(sessionToken, computerId);
+
     return sessionToken;
   }
 
   verifySession(sessionToken) {
-    if (!sessionToken || !this.activeSessions.has(sessionToken)) {
+    if (
+      typeof sessionToken !== 'string' ||
+      !this.activeSessions.has(sessionToken)
+    ) {
       return null;
     }
+
     const computerId = this.activeSessions.get(sessionToken);
-    return this.pairedComputers.get(computerId) || null;
+    const computer = this.pairedComputers.get(computerId);
+
+    if (!computer || computer.sessionToken !== sessionToken) {
+      this.activeSessions.delete(sessionToken);
+      return null;
+    }
+
+    computer.lastSeen = Date.now();
+    return computer;
   }
 
   verifySignature(payload, secretKey, expectedSignature) {
-    if (!payload || !secretKey || !expectedSignature) return false;
-    const hmac = crypto.createHmac('sha256', secretKey);
-    hmac.update(payload);
-    const calculated = hmac.digest('hex');
-    return crypto.timingSafeEqual(Buffer.from(calculated), Buffer.from(expectedSignature));
+    if (
+      typeof payload !== 'string' ||
+      typeof secretKey !== 'string' ||
+      typeof expectedSignature !== 'string' ||
+      !/^[a-f0-9]{64}$/i.test(expectedSignature)
+    ) {
+      return false;
+    }
+
+    const calculated = crypto
+      .createHmac('sha256', secretKey)
+      .update(payload)
+      .digest('hex');
+
+    return safeEqual(calculated, expectedSignature.toLowerCase());
   }
 
   revoke(sessionToken) {
     const computerId = this.activeSessions.get(sessionToken);
-    if (computerId) {
-      this.pairedComputers.delete(computerId);
-      this.activeSessions.delete(sessionToken);
-      return true;
-    }
-    return false;
+
+    if (!computerId) return false;
+
+    this.activeSessions.delete(sessionToken);
+    this.pairedComputers.delete(computerId);
+
+    return true;
   }
 }
 
