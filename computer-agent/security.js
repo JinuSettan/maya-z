@@ -47,6 +47,11 @@ function validateSandboxedPath(targetPath) {
     };
   }
 
+  // A lone "." means the workspace root (default for LIST_FILES and terminal cwd).
+  if (normalized === '.') {
+    return { ok: true, path: '.' };
+  }
+
   const parts = normalized.split('/');
 
   if (parts.some(part => part === '..')) {
@@ -66,7 +71,35 @@ function validateSandboxedPath(targetPath) {
   return { ok: true, path: normalized };
 }
 
+// Validates a command-line argument that may refer to a path. Terminal
+// arguments are not run through a shell, but programs such as cat/ls/git
+// still open whatever path they are given, so every argument is checked.
+function validateArgument(arg) {
+  if (typeof arg !== 'string') return { ok: false, error: 'Invalid argument' };
+  if (arg.includes('\0')) return { ok: false, error: 'Invalid characters in argument' };
+
+  // Look at the value part of --flag=value too.
+  const value = arg.startsWith('-') && arg.includes('=')
+    ? arg.slice(arg.indexOf('=') + 1)
+    : arg;
+
+  const normalized = value.replace(/\\/g, '/');
+
+  if (
+    normalized.startsWith('/') ||
+    normalized.startsWith('~') ||
+    /^[a-zA-Z]:/.test(normalized) ||
+    normalized.split('/').some(part => part === '..') ||
+    /^file:/i.test(normalized)
+  ) {
+    return { ok: false, error: `Path outside workspace is not allowed: ${arg}` };
+  }
+
+  return { ok: true };
+}
+
 module.exports = {
   redactSecrets,
-  validateSandboxedPath
+  validateSandboxedPath,
+  validateArgument
 };
