@@ -204,7 +204,7 @@ class RealLocalComputerConnector(
                 connectionStatus = ComputerPairingStatus.CONNECTED,
                 lastSeenTimestamp = System.currentTimeMillis(),
                 capabilities = caps,
-                workspaceRoot = "/workspace"
+                workspaceRoot = "."
             )
 
             persistComputer(paired)
