@@ -4,12 +4,72 @@ const fs = require('fs');
 const { redactSecrets } = require('./security');
 const { DEFAULT_WORKSPACE, resolvePath } = require('./filesystem');
 
-const ALLOWED_BINARIES = new Set([
-  'git', 'cargo', 'gradle', 'cmake', 'msbuild', 'dotnet',
-  'npm', 'pnpm', 'yarn', 'python3', 'python', 'node',
-  'npx', 'make', 'pytest', 'go', 'rustc',
-  'ls', 'cat', 'head', 'tail', 'echo', 'mkdir', 'diff'
-]);
+const { validateArgument } = require('./security');
+
+// Interpreters (python, node, npx) are deliberately NOT allowed: they can run
+// any code and read any file, which defeats the workspace restriction.
+// Approved automation (e.g. a WhatsApp reader) runs through runSkillScript()
+// from a fixed, user-owned directory instead.
+//
+// Note: build tools (npm/pnpm/gradle/make/cargo/...) execute build scripts that
+// live in the workspace. Only point this agent at workspaces you trust.
+const SUBCOMMANDS = (...names) => args => {
+  const sub = args.find(a => !a.startsWith('-'));
+  return sub && names.includes(sub) ? null : `subcommand must be one of: ${names.join(', ')}`;
+};
+
+const POLICIES = {
+  git: args => {
+    const blocked = ['-c', '--config-env', '--exec-path', '--upload-pack', '--receive-pack', '--ext-diff', '--paginate'];
+    if (args.some(a => blocked.includes(a) || a.startsWith('--upload-pack=') || a.startsWith('--exec-path='))) {
+      return 'git option is not allowed';
+    }
+    return SUBCOMMANDS('status', 'log', 'diff', 'add', 'commit', 'branch', 'checkout', 'switch', 'show', 'init')(args);
+  },
+  pnpm: args => (args[0] === 'run'
+    ? (['build', 'test', 'lint', 'typecheck'].includes(args[1]) ? null : 'only run build/test/lint/typecheck')
+    : SUBCOMMANDS('install', 'i', 'test', 'build')(args)),
+  npm: args => (args[0] === 'run'
+    ? (['build', 'test', 'lint', 'typecheck'].includes(args[1]) ? null : 'only run build/test/lint/typecheck')
+    : SUBCOMMANDS('install', 'ci', 'test')(args)),
+  yarn: args => (args[0] === 'run'
+    ? (['build', 'test', 'lint', 'typecheck'].includes(args[1]) ? null : 'only run build/test/lint/typecheck')
+    : SUBCOMMANDS('install', 'test', 'build')(args)),
+  gradle: args => (args.every(a => a.startsWith('-') || /^(assemble\w*|build|test|clean|tasks|check)$/.test(a)) ? null : 'unsupported gradle task'),
+  cargo: SUBCOMMANDS('build', 'test', 'check'),
+  go: SUBCOMMANDS('build', 'test', 'vet', 'mod'),
+  dotnet: SUBCOMMANDS('build', 'test', 'restore'),
+  cmake: () => null,
+  make: () => null,
+  msbuild: () => null,
+  pytest: () => null,
+  rustc: () => null,
+  ls: () => null,
+  cat: () => null,
+  head: () => null,
+  tail: () => null,
+  diff: () => null,
+  mkdir: () => null,
+  echo: () => null
+};
+
+const ALLOWED_BINARIES = new Set(Object.keys(POLICIES));
+// echo never opens files, so its arguments are free text.
+const NO_PATH_CHECK = new Set(['echo']);
+
+function checkPolicy(binary, args) {
+  const policy = POLICIES[binary];
+  if (!policy) return `'${binary}' is not permitted.`;
+
+  if (!NO_PATH_CHECK.has(binary)) {
+    for (const arg of args) {
+      const check = validateArgument(arg);
+      if (!check.ok) return check.error;
+    }
+  }
+
+  return policy(args);
+}
 
 const BLOCKED_ARGUMENTS = /[;&|<>`\n\r]/;
 
@@ -110,6 +170,16 @@ function runTerminal(command, cwd = '.', timeoutSec = 60) {
       });
     }
 
+    const policyError = checkPolicy(binary, args);
+
+    if (policyError) {
+      return resolve({
+        success: false,
+        output: `COMMAND_NOT_ALLOWED: ${policyError}`,
+        exitCode: 2
+      });
+    }
+
     let workingDirectory;
 
     try {
@@ -204,8 +274,50 @@ function runTerminal(command, cwd = '.', timeoutSec = 60) {
   });
 }
 
+const SCRIPTS_DIR = path.resolve(
+  process.env.TESSA_SCRIPTS_DIR || path.join(__dirname, 'approved-scripts')
+);
+
+// Runs a script from SCRIPTS_DIR by name. The directory is owned by the user
+// and is outside the workspace, so the agent cannot create or edit scripts.
+function runSkillScript(name, args = [], timeoutSec = 120) {
+  if (typeof name !== 'string' || !/^[a-z0-9_-]{1,50}$/.test(name)) {
+    return Promise.resolve({ success: false, output: 'Invalid script name', exitCode: 2 });
+  }
+  if (!Array.isArray(args) || args.length > 20 || args.some(a => typeof a !== 'string' || validateArgument(a).ok === false || a.length > 500)) {
+    return Promise.resolve({ success: false, output: 'Invalid script arguments', exitCode: 2 });
+  }
+
+  const scriptPath = path.join(SCRIPTS_DIR, `${name}.js`);
+  if (!fs.existsSync(scriptPath)) {
+    return Promise.resolve({ success: false, output: `Approved script not found: ${name}`, exitCode: 2 });
+  }
+
+  return new Promise(resolve => {
+    let output = '';
+    const child = spawn(process.execPath, [scriptPath, ...args], {
+      cwd: DEFAULT_WORKSPACE,
+      shell: false,
+      env: { PATH: process.env.PATH || '', HOME: process.env.HOME || '', TESSA_WORKSPACE: DEFAULT_WORKSPACE },
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+    const append = c => { if (output.length < 64000) output += c.toString('utf8'); };
+    child.stdout.on('data', append);
+    child.stderr.on('data', append);
+    const timer = setTimeout(() => child.kill(), Math.min(Math.max(Number(timeoutSec) || 120, 1), 600) * 1000);
+    child.on('error', e => { clearTimeout(timer); resolve({ success: false, output: e.message, exitCode: 1 }); });
+    child.on('close', code => {
+      clearTimeout(timer);
+      resolve({ success: code === 0, output: redactSecrets(output).slice(0, 64000), exitCode: code ?? 1 });
+    });
+  });
+}
+
 module.exports = {
   runTerminal,
+  runSkillScript,
+  checkPolicy,
   tokenize,
   ALLOWED_BINARIES
 };
+     
