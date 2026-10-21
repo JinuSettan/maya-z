@@ -5,7 +5,7 @@ import com.cocateail.maya.tessa.*
 
 class TerminalTool(
     private val connector: LocalComputerConnector? = null,
-    private val defaultWorkspaceRoot: String = "/workspace"
+    private val defaultWorkspaceRoot: String = "."
 ) : TessaTool {
 
     companion object {
