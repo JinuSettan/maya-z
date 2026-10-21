@@ -85,3 +85,6 @@ app/src/main/cpp/llama.cpp/models/*.gguf
 *.bin
 *.tar.gz
 
+computer-agent/workspace/
+computer-agent/node_modules/
+
