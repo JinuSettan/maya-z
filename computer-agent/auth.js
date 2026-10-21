@@ -11,10 +11,18 @@ function safeEqual(a, b) {
   return crypto.timingSafeEqual(left, right);
 }
 
+const requestedTtlHours = Number(process.env.TESSA_SESSION_TTL_HOURS || 12);
+const SESSION_TTL_HOURS = Number.isFinite(requestedTtlHours)
+  ? Math.min(Math.max(requestedTtlHours, 1), 168)
+  : 12;
+const SESSION_TTL_MS = SESSION_TTL_HOURS * 3600 * 1000;
+const REQUEST_WINDOW_MS = 60 * 1000;
+
 class AuthManager {
   constructor() {
     this.pairedComputers = new Map();
     this.activeSessions = new Map();
+    this.seenNonces = new Map();
 
     this.expectedPairingToken =
       process.env.TESSA_PAIRING_TOKEN ||
@@ -56,6 +64,7 @@ class AuthManager {
       // Never return this field in an API response.
       pairingToken,
 
+      createdAt: Date.now(),
       lastSeen: Date.now()
     };
 
@@ -87,8 +96,42 @@ class AuthManager {
       return null;
     }
 
+    if (Date.now() - computer.createdAt > SESSION_TTL_MS) {
+      this.activeSessions.delete(sessionToken);
+      this.pairedComputers.delete(computerId);
+      return null;
+    }
+
     computer.lastSeen = Date.now();
     return computer;
+  }
+
+  // Replay-protected verification. The signature covers
+  // `${timestamp}.${nonce}.${rawBody}`; a request is accepted only if the
+  // timestamp is recent and the nonce was never used before.
+  verifySignedRequest(rawBody, secretKey, { timestamp, nonce, signature }, now = Date.now()) {
+    if (
+      typeof timestamp !== 'string' || !/^\d{10,16}$/.test(timestamp) ||
+      typeof nonce !== 'string' || !/^[A-Za-z0-9_-]{16,64}$/.test(nonce)
+    ) {
+      return false;
+    }
+
+    if (Math.abs(now - Number(timestamp)) > REQUEST_WINDOW_MS) return false;
+
+    // Drop expired nonces so the cache stays small.
+    for (const [key, expiry] of this.seenNonces) {
+      if (expiry < now) this.seenNonces.delete(key);
+    }
+
+    const nonceKey = `${secretKey.slice(0, 8)}:${nonce}`;
+    if (this.seenNonces.has(nonceKey)) return false;
+
+    const ok = this.verifySignature(`${timestamp}.${nonce}.${rawBody}`, secretKey, signature);
+    if (!ok) return false;
+
+    this.seenNonces.set(nonceKey, now + 2 * REQUEST_WINDOW_MS);
+    return true;
   }
 
   verifySignature(payload, secretKey, expectedSignature) {
