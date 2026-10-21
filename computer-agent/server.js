@@ -7,6 +7,7 @@ const filesystem = require('./filesystem');
 const terminal = require('./terminal');
 const browser = require('./browser');
 const unreal = require('./unreal');
+const report = require('./skills/report');
 const { redactSecrets } = require('./security');
 
 const app = express();
@@ -14,6 +15,29 @@ const PORT = Number(process.env.PORT || 8990);
 const HOST = process.env.HOST || '0.0.0.0';
 
 app.disable('x-powered-by');
+
+// Only devices on a private network (home Wi-Fi, Tailscale) may connect.
+// Set TESSA_ALLOW_PUBLIC=1 to turn this off (not recommended).
+function isPrivateAddress(address) {
+  const ip = String(address || '').replace(/^::ffff:/, '');
+  return (
+    ip === '::1' ||
+    /^127\./.test(ip) ||
+    /^10\./.test(ip) ||
+    /^192\.168\./.test(ip) ||
+    /^172\.(1[6-9]|2\d|3[01])\./.test(ip) ||
+    /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(ip) || // Tailscale / CGNAT
+    /^fe80:/i.test(ip) ||
+    /^f[cd][0-9a-f]{2}:/i.test(ip)
+  );
+}
+
+app.use((req, res, next) => {
+  if (process.env.TESSA_ALLOW_PUBLIC === '1' || isPrivateAddress(req.socket.remoteAddress)) {
+    return next();
+  }
+  return res.status(403).json({ success: false, error: 'Only private-network clients are allowed' });
+});
 
 app.use(express.json({
   limit: '1mb',
@@ -27,6 +51,12 @@ const pairAttempts = new Map();
 
 function allowPairAttempt(ip) {
   const now = Date.now();
+
+  // Forget addresses that have been quiet for a minute so the map cannot grow forever.
+  for (const [key, times] of pairAttempts) {
+    if (!times.some(t => now - t < 60 * 1000)) pairAttempts.delete(key);
+  }
+
   const recent = (pairAttempts.get(ip) || []).filter(
     timestamp => now - timestamp < 60 * 1000
   );
@@ -46,13 +76,14 @@ function sessionComputer(req) {
 }
 
 function hasValidSignature(req, secretKey) {
-  const signature = req.headers['x-tessa-signature'];
-
   return Boolean(
     req.rawBody !== undefined &&
     typeof secretKey === 'string' &&
-    typeof signature === 'string' &&
-    auth.verifySignature(req.rawBody, secretKey, signature)
+    auth.verifySignedRequest(req.rawBody, secretKey, {
+      timestamp: req.headers['x-tessa-timestamp'],
+      nonce: req.headers['x-tessa-nonce'],
+      signature: req.headers['x-tessa-signature']
+    })
   );
 }
 
@@ -62,6 +93,14 @@ function unauthorized(res, message = 'Unauthorized') {
     error: message
   });
 }
+
+function structuredParameter(parameters, key, fallback) {
+  const value = parameters[key];
+  if (value === undefined || value === null || value === '') return fallback;
+  if (typeof value !== 'string') return value;
+  try { return JSON.parse(value); } catch { return fallback; }
+}
+
 
 app.get('/api/tessa/health', (req, res) => {
   if (!sessionComputer(req)) {
@@ -135,6 +174,9 @@ app.get('/api/tessa/capabilities', (req, res) => {
       'FILE_DELETE',
       'DIRECTORY_CREATE',
       'TERMINAL',
+      'RUN_SKILL_SCRIPT',
+      'REPORT',
+      'OUTBOX',
       'BROWSER',
       'UNREAL_ENGINE',
       'BUILD',
@@ -143,6 +185,8 @@ app.get('/api/tessa/capabilities', (req, res) => {
     restrictions: {
       workspaceOnly: true,
       terminalAllowlist: true,
+      terminalInterpreters: false,
+      replayProtection: true,
       shellChaining: false,
       browserAutomation: false
     }
@@ -270,6 +314,106 @@ app.post('/api/tessa/action', async (req, res) => {
         });
       }
 
+      case 'RUN_SKILL_SCRIPT': {
+        const result = await terminal.runSkillScript(
+          parameters.name,
+          parameters.args || [],
+          parameters.timeoutSec || 120
+        );
+
+        return res.json({
+          success: result.success,
+          outputSummary: result.output,
+          data: { exitCode: result.exitCode }
+        });
+      }
+
+      case 'REPORT_CLASSIFY': {
+        return res.json({
+          success: true,
+          outputSummary: 'Classified request',
+          data: report.classifyRequest(parameters.text)
+        });
+      }
+
+      case 'REPORT_FILTER_CHATS': {
+        const messages = structuredParameter(parameters, 'messages', []);
+        const allowList = structuredParameter(parameters, 'allowList', []);
+        if (!Array.isArray(messages) || !Array.isArray(allowList)) {
+          return res.status(400).json({ success: false, outputSummary: 'messages and allowList must be JSON arrays' });
+        }
+        const allowed = report.filterAllowedChats(messages, allowList);
+
+        return res.json({
+          success: true,
+          outputSummary: `${allowed.length} message(s) from allowed chats`,
+          data: { messages: allowed }
+        });
+      }
+
+      case 'REPORT_CREATE': {
+        if (typeof parameters.title !== 'string' || !parameters.title.trim() || parameters.title.length > 300) {
+          return res.status(400).json({ success: false, outputSummary: 'title is required and must be at most 300 characters' });
+        }
+        const sections = structuredParameter(parameters, 'sections', []);
+        const sources = structuredParameter(parameters, 'sources', []);
+        if (!Array.isArray(sections) || !Array.isArray(sources)) {
+          return res.status(400).json({ success: false, outputSummary: 'sections and sources must be JSON arrays' });
+        }
+        const created = await report.createReport({
+          title: parameters.title,
+          summary: typeof parameters.summary === 'string' ? parameters.summary.slice(0, 50000) : '',
+          sections,
+          sources
+        });
+
+        return res.json({
+          success: true,
+          outputSummary: `Report saved to ${created.path}`,
+          data: created
+        });
+      }
+
+      case 'OUTBOX_QUEUE': {
+        const item = report.queueSend({
+          reportPath: parameters.reportPath,
+          to: parameters.to,
+          channel: parameters.channel,
+          note: parameters.note
+        });
+
+        return res.json({
+          success: true,
+          outputSummary: `Queued for approval (id ${item.id}). Nothing has been sent.`,
+          data: item
+        });
+      }
+
+      case 'OUTBOX_LIST': {
+        const status = parameters.status;
+        if (status !== undefined && !['pending', 'approved', 'denied'].includes(status)) {
+          return res.status(400).json({ success: false, outputSummary: 'Invalid outbox status' });
+        }
+        return res.json({
+          success: true,
+          outputSummary: 'Outbox',
+          data: { items: report.listOutbox(status) }
+        });
+      }
+
+      case 'OUTBOX_DECIDE': {
+        if (typeof parameters.id !== 'string' || parameters.id.length > 100) {
+          return res.status(400).json({ success: false, outputSummary: 'Invalid outbox item id' });
+        }
+        const item = report.decide(parameters.id, parameters.decision);
+
+        return res.json({
+          success: true,
+          outputSummary: `Item ${item.id} ${item.status}`,
+          data: item
+        });
+      }
+
       case 'OPEN_URL': {
         if (typeof target !== 'string') {
           return res.status(400).json({
@@ -303,11 +447,12 @@ app.post('/api/tessa/action', async (req, res) => {
 
         return res.json({
           success: true,
-          outputSummary: page.textContent,
+          outputSummary: 'URL validated, but browser automation is not installed; the page was not fetched or inspected.',
           data: {
             url: page.url,
             title: page.title,
-            browserAutomationAvailable: false
+            browserAutomationAvailable: false,
+            pageInspected: false
           }
         });
       }
