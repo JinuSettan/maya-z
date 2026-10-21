@@ -60,3 +60,37 @@ approval layer.
   Android connector.
 
 Test on a disposable workspace before using important project files.
+
+## v1.3 security changes
+
+- **No interpreters.** `python`, `node` and `npx` are no longer allowed in the
+  terminal. Every argument that looks like a path must stay inside the
+  workspace, and each tool only accepts a short list of subcommands.
+  Approved automation goes in `approved-scripts/` and is started with
+  the `RUN_SKILL_SCRIPT` action.
+- **Replay protection.** Signed requests must send `X-Tessa-Timestamp` and
+  `X-Tessa-Nonce`; the signature covers `timestamp.nonce.body`. Requests older
+  than 60 seconds or reusing a nonce are rejected. Sessions expire after 12 h
+  (`TESSA_SESSION_TTL_HOURS`).
+- **Private network only.** Clients outside home Wi-Fi / Tailscale ranges are
+  refused (`TESSA_ALLOW_PUBLIC=1` disables this).
+- Build tools still run scripts from the workspace. Only use workspaces you
+  trust.
+- Traffic is still plain HTTP. Use it over Tailscale/WireGuard, not open Wi-Fi.
+  Do not expose port 8990 to the public internet.
+- Build/package-manager commands can execute project scripts. Only use a
+  workspace containing code you trust; command allowlisting is not a full
+  operating-system sandbox.
+
+## Report skill
+
+Actions: `REPORT_CLASSIFY`, `REPORT_FILTER_CHATS`, `REPORT_CREATE` (PDF into
+`reports/`), `OUTBOX_QUEUE`, `OUTBOX_LIST`, `OUTBOX_DECIDE`.
+
+Nothing is ever sent from the computer. Queued items stay `pending` until you
+approve them in the app, which then sends them with its own connector.
+Install `pdfkit` and set `TESSA_PDF_FONT` to a compatible Unicode font file
+(for example Noto Sans Malayalam) for Malayalam output. The font path must exist.
+The fallback PDF writer only supports basic Latin text.
+
+Run tests: `npm test` (uses Node.js built-in test runner; no extra test framework required).
