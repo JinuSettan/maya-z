@@ -4,7 +4,8 @@
   "description": "Secure Local Computer Companion Service for TESSA Turbo V1.2",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test test/agent.test.js"
   },
   "dependencies": {
     "express": "^4.19.2"
