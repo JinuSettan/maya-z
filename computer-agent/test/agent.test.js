@@ -25,16 +25,18 @@ test('secret redaction masks common token-like values', () => {
   assert.doesNotMatch(redactSecrets(input), /abcdefghijklmnop123456/);
 });
 
-test('sandbox path validation allows ordinary relative paths', () => {
+test('sandbox path validation allows workspace root and ordinary relative paths', () => {
+  assert.deepEqual(validateSandboxedPath('.'), { ok: true, path: '.' });
   assert.deepEqual(validateSandboxedPath('reports/summary.pdf'), {
     ok: true,
     path: 'reports/summary.pdf'
   });
 });
 
-test('sandbox path validation rejects traversal and absolute paths', () => {
+test('sandbox path validation rejects traversal, internal dot segments, and absolute paths', () => {
   assert.equal(validateSandboxedPath('../secret.txt').ok, false);
   assert.equal(validateSandboxedPath('reports/../../secret.txt').ok, false);
+  assert.equal(validateSandboxedPath('reports/./secret.txt').ok, false);
   assert.equal(validateSandboxedPath('/etc/passwd').ok, false);
   assert.equal(validateSandboxedPath('C:\\\\Windows\\\\win.ini').ok, false);
 });
