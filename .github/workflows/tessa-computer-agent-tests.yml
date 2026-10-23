@@ -1,0 +1,36 @@
+name: TESSA Computer Agent Tests
+
+on:
+  push:
+    branches:
+      - tessa-v12-write-test-20261023
+  pull_request:
+    branches:
+      - tessa-v12-write-test-20261023
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [20, 22]
+    defaults:
+      run:
+        working-directory: computer-agent
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+          cache-dependency-path: computer-agent/package.json
+      - name: Install dependencies
+        run: npm install --ignore-scripts
+      - name: Run tests
+        run: npm test
