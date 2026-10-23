@@ -1,0 +1,26 @@
+# Supabase CLI configuration for TESSA Turbo V1.2.
+# This file enables local migration workflows; it does not deploy anything by itself.
+project_id = "tessa-turbo-v12"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54322
+major_version = 17
+
+[studio]
+enabled = true
+port = 54323
+
+[auth]
+enabled = true
+site_url = "http://localhost:3000"
+additional_redirect_urls = ["http://127.0.0.1:3000"]
+
+[analytics]
+enabled = false
