@@ -1,12 +1,11 @@
 # TESSA Local Computer Agent
 
-A local Node.js companion service for authorized development tasks from MAYA/TESSA.
+A Node.js companion service for authorized development tasks from MAYA/TESSA.
 
 ## Requirements
 
-- Node.js 18 or newer
+- Node.js 20 or newer
 - npm
-- A trusted private network for Android-to-computer access
 
 ## Install
 
@@ -18,45 +17,50 @@ From this directory:
 
     npm start
 
-On first startup, the terminal prints a pairing token.
-Enter that token in the MAYA/TESSA Pair Local Computer screen.
+On first startup, the service prints a temporary pairing token if
+`TESSA_PAIRING_TOKEN` is not configured. Treat it like a password:
+never commit it or share it in screenshots, chat messages, or public logs.
+For repeatable local setup, create a long random token locally and set
+`TESSA_PAIRING_TOKEN` in the environment. See `.env.example`; this app
+does not automatically load a .env file.
 
-The token is private. Do not post it in GitHub, screenshots,
-chat messages, or public logs.
+## Configuration
 
-To use a persistent token, set TESSA_PAIRING_TOKEN in the
-computer's environment before starting the service.
+- `PORT`: service port (default 8990)
+- `HOST`: bind interface (default 127.0.0.1)
+- `TESSA_WORKSPACE`: workspace directory (defaults to computer-agent/workspace)
 
-Optional environment variables:
+The default bind is loopback for safety. To connect from another device on a
+trusted LAN, explicitly configure a private LAN interface and firewall rules.
+Do not expose this service directly to the public internet: the Android
+connector currently does not provide HTTPS transport.
 
-- PORT: service port (default 8990)
-- HOST: network interface (default 0.0.0.0)
-- TESSA_WORKSPACE: local workspace directory
+## Security boundaries
 
-## Workspace and command restrictions
+File operations are intended to stay within the configured workspace.
+Terminal commands use an executable allowlist and `shell: false`, but this is
+not an operating-system sandbox; allowlisted programs can still access powerful
+functionality. Use a disposable workspace and an unprivileged OS account.
+Destructive operations should require explicit user approval in the client.
 
-File operations are limited to the configured workspace.
-Terminal execution uses an executable allowlist and does not
-invoke a shell for command strings.
+## Current limitations (not yet implemented)
 
-Only run this service on a trusted private network. The current
-Android connector uses HTTP on the local network, not encrypted
-HTTPS. Do not expose port 8990 to the public internet.
+- No production cloud deployment or persistent remote runtime.
+- No Supabase client integration in the Node server yet; the SQL migration is
+  only the database foundation and must be applied to the dedicated project.
+- Browser module is a placeholder and does not inspect live pages or automate
+  clicks, forms, or logins.
+- No persistent task queue, autonomous planner, resume engine, or repair loop.
+- No Gmail, WhatsApp, Amazon, or Flipkart API integration; outbox entries do
+  not send messages.
+- Unreal project creation writes a basic scaffold only; it does not install or
+  launch Unreal Engine.
+- The service does not provide HTTPS transport for the Android connector.
 
-Destructive operations should require explicit user approval in
-the Android app. This server-side service does not replace that
-approval layer.
+## Tests
 
-## Current limitations
+    npm test
 
-- Browser integration is a placeholder; it does not perform real
-  browser automation or inspect live page contents.
-- The service does not yet have a persistent task queue, autonomous
-  task planner, offline resume engine, or automatic repair loop.
-- Offline operation is limited to tools already installed locally.
-- Unreal project creation creates a basic project scaffold; it does
-  not guarantee that the project can compile or launch.
-- The current service does not provide HTTPS transport for the
-  Android connector.
-
-Test on a disposable workspace before using important project files.
+GitHub Actions runs the test suite on Node.js 20 and 22 for the TESSA
+development branch. A passing CI run must be observed before calling the
+branch verified.
