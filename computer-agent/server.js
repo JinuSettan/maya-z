@@ -11,7 +11,7 @@ const { redactSecrets } = require('./security');
 
 const app = express();
 const PORT = Number(process.env.PORT || 8990);
-const HOST = process.env.HOST || '0.0.0.0';
+const HOST = process.env.HOST || '127.0.0.1';
 
 app.disable('x-powered-by');
 
