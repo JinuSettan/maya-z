@@ -43,6 +43,15 @@ not an operating-system sandbox; allowlisted programs can still access powerful
 functionality. Use a disposable workspace and an unprivileged OS account.
 Destructive operations should require explicit user approval in the client.
 
+## Memory actions
+
+The signed `/api/tessa/action` endpoint supports:
+- `MEMORY_CREATE_CANDIDATE`: requires `parameters.consent: true`, a supported kind, and content. New entries remain candidates until reviewed.
+- `MEMORY_LIST`: lists approved entries by default; pass `parameters.status: "candidate"` to review pending entries.
+- `MEMORY_REVIEW`: approves or rejects a candidate by ID.
+
+Memory is currently stored in the local agent's JSON file, scoped to the paired computer ID. It is not yet synchronized to Supabase and is not durable across ephemeral cloud deployments. Keep the agent on a trusted private machine; do not expose it publicly.
+
 ## Current limitations (not yet implemented)
 
 - No production cloud deployment or persistent remote runtime.
