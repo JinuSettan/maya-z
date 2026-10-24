@@ -3,6 +3,7 @@
 
 const express = require('express');
 const auth = require('./auth');
+const memory = require('./memory');
 const filesystem = require('./filesystem');
 const terminal = require('./terminal');
 const browser = require('./browser');
@@ -352,6 +353,83 @@ app.post('/api/tessa/action', async (req, res) => {
           outputSummary:
             `Created project scaffold: ${project.projectName}`,
           data: project
+        });
+      }
+
+      case 'MEMORY_CREATE_CANDIDATE': {
+        if (
+          parameters.consent !== true ||
+          typeof parameters.kind !== 'string' ||
+          typeof parameters.content !== 'string'
+        ) {
+          return res.status(400).json({
+            success: false,
+            outputSummary: 'Explicit consent, kind, and content are required'
+          });
+        }
+
+        const record = memory.createCandidate({
+          scope: computer.computerId,
+          kind: parameters.kind,
+          content: parameters.content,
+          source: parameters.source || 'explicit_user_feedback',
+          consent: true,
+          confidence: parameters.confidence,
+          expiresAt: parameters.expiresAt
+        });
+
+        return res.json({
+          success: true,
+          outputSummary: 'Memory candidate saved for review',
+          data: record
+        });
+      }
+
+      case 'MEMORY_LIST': {
+        const status = parameters.status || 'approved';
+        const records = memory.listMemories(
+          computer.computerId,
+          { status }
+        );
+
+        return res.json({
+          success: true,
+          outputSummary: JSON.stringify(records),
+          data: { count: records.length }
+        });
+      }
+
+      case 'MEMORY_REVIEW': {
+        if (
+          typeof parameters.id !== 'string' ||
+          !['approved', 'rejected'].includes(parameters.decision)
+        ) {
+          return res.status(400).json({
+            success: false,
+            outputSummary: 'Memory id and approved/rejected decision are required'
+          });
+        }
+
+        const records = memory.listMemories(
+          computer.computerId,
+          { status: 'candidate' }
+        );
+        if (!records.some(record => record.id === parameters.id)) {
+          return res.status(404).json({
+            success: false,
+            outputSummary: 'Memory candidate not found for this paired computer'
+          });
+        }
+
+        const record = memory.reviewCandidate(
+          parameters.id,
+          parameters.decision
+        );
+
+        return res.json({
+          success: true,
+          outputSummary: 'Memory candidate reviewed',
+          data: record
         });
       }
 
