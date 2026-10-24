@@ -139,7 +139,10 @@ app.get('/api/tessa/capabilities', (req, res) => {
       'BROWSER',
       'UNREAL_ENGINE',
       'BUILD',
-      'GIT'
+      'GIT',
+      'MEMORY_CREATE_CANDIDATE',
+      'MEMORY_LIST',
+      'MEMORY_REVIEW'
     ],
     restrictions: {
       workspaceOnly: true,
