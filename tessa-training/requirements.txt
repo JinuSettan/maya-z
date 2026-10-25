@@ -1,0 +1,8 @@
+# Install in a GPU-enabled Python environment.
+# These dependencies do not make CPU-only 4B QLoRA training practical.
+transformers>=4.51.0
+datasets>=3.6.0
+peft>=0.15.0
+accelerate>=1.6.0
+bitsandbytes>=0.45.5
+PyYAML>=6.0.2
