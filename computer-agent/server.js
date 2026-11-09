@@ -1,3 +1,6 @@
+
+'use strict';
+
 const express = require('express');
 const auth = require('./auth');
 const filesystem = require('./filesystem');
@@ -11,7 +14,14 @@ const PORT = Number(process.env.PORT || 8990);
 const HOST = process.env.HOST || '0.0.0.0';
 
 app.disable('x-powered-by');
-app.use(express.json({ limit: '1mb', strict: true }));
+
+app.use(express.json({
+  limit: '1mb',
+  strict: true,
+  verify(req, res, buffer) {
+    req.rawBody = buffer.toString('utf8');
+  }
+}));
 
 const pairAttempts = new Map();
 
@@ -35,12 +45,30 @@ function sessionComputer(req) {
   return auth.verifySession(req.headers['x-tessa-session']);
 }
 
+function hasValidSignature(req, secretKey) {
+  const signature = req.headers['x-tessa-signature'];
+
+  return Boolean(
+    req.rawBody !== undefined &&
+    typeof secretKey === 'string' &&
+    typeof signature === 'string' &&
+    auth.verifySignature(req.rawBody, secretKey, signature)
+  );
+}
+
+function unauthorized(res, message = 'Unauthorized') {
+  return res.status(401).json({
+    success: false,
+    error: message
+  });
+}
+
 app.get('/api/tessa/health', (req, res) => {
   if (!sessionComputer(req)) {
-    return res.status(401).json({ error: 'Unauthorized' });
+    return unauthorized(res);
   }
 
-  res.json({
+  return res.json({
     status: 'OK',
     timestamp: Date.now(),
     service: 'TESSA Local Computer Agent'
@@ -52,6 +80,7 @@ app.post('/api/tessa/pair', (req, res) => {
 
   if (!allowPairAttempt(ip)) {
     return res.status(429).json({
+      success: false,
       error: 'Too many pairing attempts. Try again later.'
     });
   }
@@ -65,12 +94,13 @@ app.post('/api/tessa/pair', (req, res) => {
     !pairingToken
   ) {
     return res.status(400).json({
+      success: false,
       error: 'computerId and pairingToken are required'
     });
   }
 
   if (!auth.isValidPairingToken(pairingToken)) {
-    return res.status(401).json({ error: 'Invalid pairing token' });
+    return unauthorized(res, 'Invalid pairing token');
   }
 
   try {
@@ -80,18 +110,24 @@ app.post('/api/tessa/pair', (req, res) => {
       pairingToken
     );
 
-    return res.json({ success: true, sessionToken });
+    return res.json({
+      success: true,
+      sessionToken
+    });
   } catch (error) {
-    return res.status(400).json({ error: error.message });
+    return res.status(400).json({
+      success: false,
+      error: error.message
+    });
   }
 });
 
 app.get('/api/tessa/capabilities', (req, res) => {
   if (!sessionComputer(req)) {
-    return res.status(401).json({ error: 'Unauthorized' });
+    return unauthorized(res);
   }
 
-  res.json({
+  return res.json({
     capabilities: [
       'FILE_READ',
       'FILE_WRITE',
@@ -113,17 +149,54 @@ app.get('/api/tessa/capabilities', (req, res) => {
   });
 });
 
+app.post('/api/tessa/revoke', (req, res) => {
+  const computer = sessionComputer(req);
+
+  if (!computer) {
+    return unauthorized(res, 'Invalid or expired session');
+  }
+
+  if (!hasValidSignature(req, computer.pairingToken)) {
+    return unauthorized(res, 'Invalid request signature');
+  }
+
+  const revoked = auth.revoke(computer.sessionToken);
+
+  if (!revoked) {
+    return unauthorized(res, 'Session could not be revoked');
+  }
+
+  return res.json({
+    success: true,
+    outputSummary: 'Computer session revoked'
+  });
+});
+
 app.post('/api/tessa/action', async (req, res) => {
-  if (!sessionComputer(req)) {
-    return res.status(401).json({
-      success: false,
-      outputSummary: 'Unauthorized session'
-    });
+  const computer = sessionComputer(req);
+
+  if (!computer) {
+    return unauthorized(res, 'Invalid or expired session');
+  }
+
+  if (!hasValidSignature(req, computer.pairingToken)) {
+    return unauthorized(res, 'Invalid request signature');
   }
 
   const body = req.body || {};
   const { action, target, taskId } = body;
   const parameters = body.parameters || {};
+
+  if (
+    !parameters ||
+    typeof parameters !== 'object' ||
+    Array.isArray(parameters)
+  ) {
+    return res.status(400).json({
+      success: false,
+      outputSummary: 'parameters must be an object'
+    });
+  }
 
   try {
     switch (action) {
@@ -144,7 +217,10 @@ app.post('/api/tessa/action', async (req, res) => {
           });
         }
 
-        const result = filesystem.writeFile(target, parameters.content);
+        const result = filesystem.writeFile(
+          target,
+          parameters.content
+        );
 
         return res.json({
           success: true,
@@ -188,7 +264,9 @@ app.post('/api/tessa/action', async (req, res) => {
         return res.json({
           success: result.success,
           outputSummary: result.output,
-          data: { exitCode: result.exitCode }
+          data: {
+            exitCode: result.exitCode
+          }
         });
       }
 
@@ -264,11 +342,15 @@ app.post('/api/tessa/action', async (req, res) => {
           parameters.targetFolder || '.'
         );
 
-        const project = unreal.createUnrealProject(projectName, parent);
+        const project = unreal.createUnrealProject(
+          projectName,
+          parent
+        );
 
         return res.json({
           success: true,
-          outputSummary: `Created project scaffold: ${project.projectName}`,
+          outputSummary:
+            `Created project scaffold: ${project.projectName}`,
           data: project
         });
       }
@@ -282,7 +364,9 @@ app.post('/api/tessa/action', async (req, res) => {
   } catch (error) {
     console.error(
       '[TESSA action error]',
-      redactSecrets(error && error.stack ? error.stack : String(error))
+      redactSecrets(
+        error && error.stack ? error.stack : String(error)
+      )
     );
 
     return res.status(500).json({
@@ -294,23 +378,39 @@ app.post('/api/tessa/action', async (req, res) => {
 });
 
 app.use((error, req, res, next) => {
-  if (res.headersSent) return next(error);
+  if (res.headersSent) {
+    return next(error);
+  }
 
   if (error && error.type === 'entity.too.large') {
-    return res.status(413).json({ error: 'Request body too large' });
+    return res.status(413).json({
+      success: false,
+      error: 'Request body too large'
+    });
   }
 
   if (error instanceof SyntaxError && 'body' in error) {
-    return res.status(400).json({ error: 'Invalid JSON request' });
+    return res.status(400).json({
+      success: false,
+      error: 'Invalid JSON request'
+    });
   }
 
-  console.error('[TESSA server error]', redactSecrets(String(error)));
+  console.error(
+    '[TESSA server error]',
+    redactSecrets(String(error))
+  );
 
-  return res.status(500).json({ error: 'Internal server error' });
+  return res.status(500).json({
+    success: false,
+    error: 'Internal server error'
+  });
 });
 
 app.listen(PORT, HOST, () => {
-  console.log(`TESSA Local Computer Agent listening on ${HOST}:${PORT}`);
+  console.log(
+    `TESSA Local Computer Agent listening on ${HOST}:${PORT}`
+  );
   console.log(`Workspace: ${filesystem.DEFAULT_WORKSPACE}`);
   console.log('Keep this service on a trusted private network only.');
 });
